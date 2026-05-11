@@ -1,0 +1,41 @@
+from app.extensions import db
+from datetime import datetime
+
+
+class Match(db.Model):
+    """강사-교육요청 매칭 결과 모델"""
+    __tablename__ = 'matches'
+
+    id = db.Column(db.Integer, primary_key=True)
+    request_id = db.Column(db.Integer, db.ForeignKey('education_requests.id'), nullable=False)
+    instructor_id = db.Column(db.Integer, db.ForeignKey('instructors.id'), nullable=False)
+    match_score = db.Column(db.Float)       # 총 매칭 점수 (100점 만점)
+    region_score = db.Column(db.Float)      # 권역 점수 (40점 만점)
+    specialty_score = db.Column(db.Float)   # 전문분야 점수 (40점 만점)
+    time_score = db.Column(db.Float)        # 시간대 점수 (20점 만점)
+    status = db.Column(db.String(20), default='추천')   # 매칭 상태 (추천, 수락, 거절)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        instructor = self.instructor
+        return {
+            'id': self.id,
+            'request_id': self.request_id,
+            'instructor_id': self.instructor_id,
+            'instructor_name': instructor.name if instructor else None,
+            'instructor_region': instructor.region if instructor else None,
+            'instructor_specialties': instructor.specialties if instructor else None,
+            'instructor_cert_level': instructor.cert_level if instructor else None,
+            'instructor_avg_rating': instructor.avg_rating if instructor else None,
+            'match_score': self.match_score,
+            'region_score': self.region_score,
+            'specialty_score': self.specialty_score,
+            'time_score': self.time_score,
+            'score_breakdown': {
+                '권역 점수 (40점 만점)': self.region_score,
+                '전문분야 점수 (40점 만점)': self.specialty_score,
+                '시간대 점수 (20점 만점)': self.time_score,
+            },
+            'status': self.status,
+            'created_at': str(self.created_at) if self.created_at else None,
+        }
