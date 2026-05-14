@@ -24,8 +24,9 @@ def create_app(config_name='default'):
         from . import models  # noqa: F401
         db.create_all()
 
-        # DB가 비어있을 때 더미 데이터 삽입
-        from .services.seed_data import seed_if_empty
-        seed_if_empty()
+        # 테스트 환경에서는 시드 데이터 삽입 생략 (테스트 픽스처가 직접 관리)
+        if not app.config.get('TESTING'):
+            from .services.seed_data import seed_if_empty
+            seed_if_empty()
 
     return app

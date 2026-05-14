@@ -1,5 +1,7 @@
 pip
 autopep8
+pytest
+pytest-flask
 Flask==3.0.3
 Flask-SQLAlchemy==3.1.1
 gunicorn==22.0.0
