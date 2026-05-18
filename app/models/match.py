@@ -15,9 +15,11 @@ class Match(db.Model):
     time_score = db.Column(db.Float)            # 시간대 점수 (20점 만점)
     rating_bonus = db.Column(db.Float, default=0.0)       # 평점 보너스 (+10 / +5 / 0)
     activity_penalty = db.Column(db.Float, default=0.0)   # 활동일 패널티 (-5 / -10 / 0)
-    # 매칭 유형: 정상 / 조건완화추천 / 최선추천
+    # 매칭 유형: 정상 / 조건완화추천 / 최선추천 / 신규강사보장
     match_type = db.Column(db.String(20), default='정상')
-    status = db.Column(db.String(20), default='추천')     # 매칭 상태 (추천, 수락, 거절)
+    status = db.Column(db.String(20), default='매칭제안')  # 매칭 상태 (매칭제안, 수락, 거절, 확정, 완료)
+    # 수요처가 매칭 완료 후 매기는 만족도 점수 (1.0 ~ 5.0)
+    satisfaction_score = db.Column(db.Float)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -48,5 +50,6 @@ class Match(db.Model):
                 '최종 총점': self.match_score,
             },
             'status': self.status,
+            'satisfaction_score': self.satisfaction_score,
             'created_at': str(self.created_at) if self.created_at else None,
         }

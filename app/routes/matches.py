@@ -63,6 +63,7 @@ def create_match():
         'match_mode_reason': match_mode_reason,
         'message': message,
         'total_count': result['total_count'],
+        'auto_excluded': result.get('auto_excluded', []),
         'data': matches,
     })
 
