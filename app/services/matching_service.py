@@ -368,13 +368,13 @@ def find_top_matches(request_id: int, top_n: int = 5) -> dict | None:
             rating_bonus=item['rating_bonus'],
             activity_penalty=item['activity_penalty'],
             match_type=match_type,
-            status='추천',
+            status='매칭제안',
             created_at=datetime.utcnow(),
         )
         db.session.add(m)
         saved_pairs.append((m, item))
 
-    request.status = '매칭완료'
+    request.status = '완료'
     db.session.commit()
 
     # ── 응답 구성 (점수 계산 상세 포함) ──────────────────────────────
