@@ -1100,6 +1100,11 @@ def find_top_matches(request_id: int, top_n: int = 5) -> dict | None:
 
     db.session.commit()
 
+    # v5.0: ML 학습용 로그 기록 (추천된 후보 전체 + 피처 스냅샷)
+    # 로깅 실패가 매칭 자체를 막지 않도록 import를 함수 내부에서 수행
+    from app.services.ml_logger import log_match_candidates
+    log_match_candidates(request, result_scored, engine_version='rule_based_v4')
+
     # ── 응답 구성 ────────────────────────────────────────────────
     result_list = []
     for m, item in saved_pairs:

@@ -17,6 +17,7 @@ def create_app(config_name='default'):
     from .routes.dashboard import dashboard_bp
     from .routes.map import map_bp
     from .routes.admin import admin_bp
+    from .routes.ml import ml_bp
 
     app.register_blueprint(instructors_bp, url_prefix='/api')
     app.register_blueprint(requests_bp, url_prefix='/api')
@@ -24,6 +25,7 @@ def create_app(config_name='default'):
     app.register_blueprint(dashboard_bp, url_prefix='/api')
     app.register_blueprint(map_bp, url_prefix='/api')
     app.register_blueprint(admin_bp, url_prefix='/api')
+    app.register_blueprint(ml_bp, url_prefix='/api')
 
     with app.app_context():
         # 모든 모델 import (테이블 생성을 위해 필요)

@@ -3,7 +3,9 @@ from flask import Blueprint, jsonify, request
 from app.extensions import db
 from app.models.education_request import EducationRequest
 from app.models.match import Match
+from app.services.matching_engine import run_matching
 from app.services.matching_service import find_top_matches
+from app.services.ml_logger import mark_selection, record_feedback
 
 matches_bp = Blueprint('matches', __name__)
 
@@ -91,4 +93,119 @@ def get_matches(request_id: int):
         'request_info': edu_request.to_dict(),
         'count': len(matches),
         'data': [m.to_dict() for m in matches],
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────
+# v5.0: ML 학습 데이터 수집용 피드백 엔드포인트
+# ─────────────────────────────────────────────────────────────────────
+
+@matches_bp.route('/match/select', methods=['POST'])
+def select_match():
+    """
+    수요처가 최종 강사 선택 시 호출.
+    매칭 로그(MLTrainingLog) 에 was_selected 표시 + 선택 안 된 강사들의 사유 저장.
+
+    Request Body (JSON):
+      {
+        "request_id": 1,
+        "instructor_id": 7,
+        "not_selected_reasons": {  # 선택사항. 키는 강사 id (문자열도 허용)
+          "3": "거리가 멀어서",
+          "5": "시간대 안 맞음"
+        }
+      }
+    """
+    data = request.get_json() or {}
+    request_id = data.get('request_id')
+    instructor_id = data.get('instructor_id')
+    if not request_id or not instructor_id:
+        return jsonify({
+            'success': False,
+            'message': 'request_id 와 instructor_id 가 필요합니다.',
+        }), 400
+
+    # 키가 문자열이면 int 변환 (JSON 객체 키는 문자열로 직렬화되는 경우가 많음)
+    raw_reasons = data.get('not_selected_reasons') or {}
+    reasons = {int(k): v for k, v in raw_reasons.items()}
+
+    # Match 테이블에도 선택 상태 반영 (status='확정')
+    selected_match = Match.query.filter_by(
+        request_id=request_id, instructor_id=instructor_id,
+    ).first()
+    if selected_match:
+        selected_match.status = '확정'
+        # 다른 매칭은 거절로 표시
+        Match.query.filter(
+            Match.request_id == request_id,
+            Match.id != selected_match.id,
+        ).update({'status': '거절'})
+        db.session.commit()
+
+    result = mark_selection(request_id, instructor_id, reasons)
+    return jsonify({
+        'success': True,
+        'request_id': request_id,
+        'instructor_id': instructor_id,
+        'not_selected_count': result['not_selected_count'],
+        'message': '선택이 기록되었습니다.',
+    })
+
+
+@matches_bp.route('/match/feedback', methods=['POST'])
+def submit_feedback():
+    """
+    강의 완료 후 만족도 평가 제출.
+    MLTrainingLog 의 was_conducted/final_satisfaction 갱신 + Match 테이블에도 반영.
+
+    Request Body (JSON):
+      {
+        "request_id": 1,
+        "instructor_id": 7,
+        "satisfaction_score": 4.5,
+        "was_conducted": true  # 선택사항 기본 true
+      }
+    """
+    data = request.get_json() or {}
+    request_id = data.get('request_id')
+    instructor_id = data.get('instructor_id')
+    satisfaction = data.get('satisfaction_score')
+
+    if not request_id or not instructor_id or satisfaction is None:
+        return jsonify({
+            'success': False,
+            'message': 'request_id, instructor_id, satisfaction_score 가 필요합니다.',
+        }), 400
+    if not (0.0 <= satisfaction <= 5.0):
+        return jsonify({
+            'success': False,
+            'message': 'satisfaction_score 는 0.0 ~ 5.0 범위여야 합니다.',
+        }), 400
+
+    was_conducted = bool(data.get('was_conducted', True))
+
+    # Match 테이블에도 만족도 반영 (학습 데이터 일관성)
+    selected_match = Match.query.filter_by(
+        request_id=request_id, instructor_id=instructor_id,
+    ).first()
+    if selected_match:
+        selected_match.satisfaction_score = satisfaction
+        if was_conducted:
+            selected_match.status = '완료'
+        db.session.commit()
+
+    log = record_feedback(request_id, instructor_id, satisfaction, was_conducted)
+    if not log:
+        return jsonify({
+            'success': False,
+            'message': '해당 매칭 로그를 찾을 수 없습니다.',
+        }), 404
+
+    return jsonify({
+        'success': True,
+        'request_id': request_id,
+        'instructor_id': instructor_id,
+        'satisfaction_score': satisfaction,
+        'was_conducted': was_conducted,
+        'message': '피드백이 기록되었습니다.',
     })
