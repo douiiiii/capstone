@@ -20,16 +20,26 @@ class Instructor(db.Model):
     last_active = db.Column(db.Date)                        # 마지막 활동일
     is_active = db.Column(db.Boolean, default=True)         # 활동 여부
 
-    matches = db.relationship('Match', backref='instructor', lazy=True)
+    # v4.0: 강사 - 수요처 상성 시스템
+    preferred_org_types = db.Column(db.JSON)                # 선호 기관 유형 (예: ['학교', '복지관'])
+    disliked_org_types = db.Column(db.JSON)                 # 비선호 기관 유형
+    cert_level_updated_at = db.Column(db.DateTime)          # 등급 마지막 변경 일시
 
-    def to_dict(self):
-        return {
+    matches = db.relationship('Match', backref='instructor', lazy=True)
+    grade_histories = db.relationship('GradeHistory', backref='instructor', lazy=True)
+
+    def to_dict(self, include_grade_info: bool = False):
+        """
+        일반 API 응답용 dict.
+        include_grade_info=True 인 경우 관리자용 등급 상세 정보를 포함.
+        """
+        data = {
             'id': self.id,
             'name': self.name,
             'region': self.region,
             'travel_range': self.travel_range,
             'specialties': self.specialties,
-            'cert_level': self.cert_level,
+            # 인증 등급은 관리자 전용 → 일반 응답에서는 제외
             'available_days': self.available_days,
             'available_times': self.available_times,
             'max_classes_month': self.max_classes_month,
@@ -38,4 +48,12 @@ class Instructor(db.Model):
             'avg_rating': self.avg_rating,
             'last_active': str(self.last_active) if self.last_active else None,
             'is_active': self.is_active,
+            'preferred_org_types': self.preferred_org_types,
+            'disliked_org_types': self.disliked_org_types,
         }
+        if include_grade_info:
+            data['cert_level'] = self.cert_level
+            data['cert_level_updated_at'] = (
+                str(self.cert_level_updated_at) if self.cert_level_updated_at else None
+            )
+        return data

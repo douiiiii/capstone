@@ -18,6 +18,10 @@ class EducationRequest(db.Model):
     status = db.Column(db.String(20), default='대기중')  # 요청 상태
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # v4.0: 매칭 실패 원인 (find_top_matches 결과가 5명 미만일 때 저장)
+    # 예: [{"code": "no_region", "message": "..."}]
+    failure_reasons = db.Column(db.JSON)
+
     matches = db.relationship('Match', backref='request', lazy=True)
 
     def to_dict(self):
@@ -35,4 +39,5 @@ class EducationRequest(db.Model):
             'location_type': self.location_type,
             'status': self.status,
             'created_at': str(self.created_at) if self.created_at else None,
+            'failure_reasons': self.failure_reasons,
         }

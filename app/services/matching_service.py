@@ -1,12 +1,15 @@
 """
-화성시 AI 시민리더 허브 - 매칭 알고리즘 서비스 v3.0
+화성시 AI 시민리더 허브 - 매칭 알고리즘 서비스 v4.0
 
-v2.0 대비 추가 사항:
-  A) 피드백 반영      : 수요처 만족도/재요청/누적 나쁜평가 점수화
-  B) 수요처 맞춤 추천 : 기관 유형별 가중치, 과거 매칭 이력 보너스
-  C) 강사 부하 분산   : 월 최대 강의 횟수 초과/80% 패널티/쏠림 방지
-  D) 연속 강의 매칭   : 정기 강의 우선 배정, 일정 충돌 자동 제외
-  E) 신규 강사 노출   : 누적 5회 미만 강사 +20점 보너스 + 결과 1명 보장
+v3.0 대비 추가 사항:
+  V4-A) 강사-수요처 상성 시스템
+        · 기관 유형별 과거 평균 평점 4.5+ → +15점
+        · 강사 선호 기관 유형 일치 +10 / 비선호 -5
+  V4-C) 강사 성장 추적
+        · 성장 중인 강사 (다음 등급 80% 달성) +10점
+        · 등급 자동 업그레이드 + 이력 저장은 grade_service 에서 담당
+  V4-D) 매칭 실패 원인 분석
+        · 결과 5명 미만일 때 _analyze_failure_reasons 로 구체 사유 산출
 """
 from datetime import datetime, date
 
@@ -14,6 +17,7 @@ from app.extensions import db
 from app.models.education_request import EducationRequest
 from app.models.instructor import Instructor
 from app.models.match import Match
+from app.models.organization import Organization
 from app.services.region_service import are_adjacent
 
 # ─────────────────────────────────────────────────────────
@@ -422,6 +426,152 @@ def _calc_new_instructor_bonus(instructor: Instructor) -> tuple[float, str]:
     return 0.0, ''
 
 
+# ─────────────── v4-A: 강사-수요처 상성 시스템 ─────────────────────────
+
+# 기관 유형별 상성 보너스를 받기 위한 최소 평균 평점
+ORG_CHEMISTRY_MIN_RATING = 4.5
+# 상성 보너스 점수
+ORG_CHEMISTRY_BONUS = 15.0
+# 강사 선호/비선호 기관 유형 가중치
+PREFERENCE_MATCH_BONUS = 10.0
+PREFERENCE_DISLIKE_PENALTY = -5.0
+
+
+def _normalize_org_type(org_type: str | None) -> str | None:
+    """
+    기관 유형 문자열을 비교 가능한 형태로 정규화.
+    예: '복지관/노인복지센터' → '복지관'
+    실제 기관 유형이 다양하게 표기될 수 있어 키워드 매칭을 사용.
+    """
+    if not org_type:
+        return None
+    # 우선순위가 높은 키워드부터 검사
+    for key in ('학교', '기업', '회사', '복지관', '도서관', '주민센터'):
+        if key in org_type:
+            return '기업' if key == '회사' else key
+    return org_type
+
+
+def _calc_org_chemistry_bonus(
+    instructor: Instructor, organization,
+) -> tuple[float, str]:
+    """
+    강사-기관유형 상성 보너스 (v4-A-1)
+    - 해당 기관 유형에서 강사의 과거 평균 만족도가 4.5 이상이면 +15점
+    - 평가 이력이 없으면 0점 (보너스 없음)
+    """
+    if not organization:
+        return 0.0, ''
+    target_type = _normalize_org_type(organization.type)
+    if not target_type:
+        return 0.0, ''
+
+    # 강사가 해당 유형 기관에서 진행한 매칭의 satisfaction_score 평균
+    scores: list[float] = []
+    for m in (instructor.matches or []):
+        if m.satisfaction_score is None:
+            continue
+        req = m.request
+        org = req.organization if req else None
+        if not org:
+            continue
+        if _normalize_org_type(org.type) == target_type:
+            scores.append(m.satisfaction_score)
+
+    if not scores:
+        return 0.0, f'{target_type} 평가 이력 없음 (상성 보너스 없음)'
+
+    avg = sum(scores) / len(scores)
+    if avg >= ORG_CHEMISTRY_MIN_RATING:
+        return ORG_CHEMISTRY_BONUS, (
+            f'{target_type} 평균 만족도 {avg:.2f} (≥{ORG_CHEMISTRY_MIN_RATING}) '
+            f'→ +{ORG_CHEMISTRY_BONUS:.0f}점 상성 보너스'
+        )
+    return 0.0, f'{target_type} 평균 만족도 {avg:.2f} (상성 기준 미달)'
+
+
+def _calc_preference_bonus(
+    instructor: Instructor, organization,
+) -> tuple[float, str]:
+    """
+    강사 선호/비선호 기관 유형 보너스/패널티 (v4-A-2)
+    - preferred_org_types 와 일치: +10
+    - disliked_org_types 와 일치 : -5
+    """
+    if not organization:
+        return 0.0, ''
+    target_type = _normalize_org_type(organization.type)
+    if not target_type:
+        return 0.0, ''
+
+    preferred = instructor.preferred_org_types or []
+    disliked = instructor.disliked_org_types or []
+
+    if target_type in preferred:
+        return PREFERENCE_MATCH_BONUS, (
+            f'선호 기관 유형({target_type}) 일치 → +{PREFERENCE_MATCH_BONUS:.0f}점'
+        )
+    if target_type in disliked:
+        return PREFERENCE_DISLIKE_PENALTY, (
+            f'비선호 기관 유형({target_type}) → {PREFERENCE_DISLIKE_PENALTY:.0f}점'
+        )
+    return 0.0, ''
+
+
+# ─────────────── v4-C: 강사 성장 추적 (성장 보너스만 매칭에 반영) ──────
+
+# 등급 자동 업그레이드 기준 (grade_service 와 공유 — 수정 시 동기화)
+GRADE_UPGRADE_RULES = {
+    '기초': {
+        'next': '중급',
+        'min_classes': 10,
+        'min_rating': 4.0,
+    },
+    '중급': {
+        'next': '전문가',
+        'min_classes': 30,
+        'min_rating': 4.5,
+    },
+}
+# 성장 보너스: 다음 등급 조건의 80% 이상 달성 시 +10
+GROWTH_PROGRESS_THRESHOLD = 0.8
+GROWTH_BONUS = 10.0
+
+
+def _calc_grade_progress(instructor: Instructor) -> tuple[float, dict | None]:
+    """
+    다음 등급까지의 진척률(0.0~1.0)과 기준 dict 반환.
+    승급 기준이 없는 등급(전문가/미설정)은 (0.0, None).
+    """
+    rule = GRADE_UPGRADE_RULES.get(instructor.cert_level or '')
+    if not rule:
+        return 0.0, None
+    classes = instructor.total_classes or 0
+    rating = instructor.avg_rating or 0.0
+    # 강의수/평점 각각의 달성률 중 더 낮은 값으로 진척률 산출
+    class_ratio = min(classes / rule['min_classes'], 1.0)
+    rating_ratio = min(rating / rule['min_rating'], 1.0)
+    return min(class_ratio, rating_ratio), rule
+
+
+def _calc_growth_bonus(instructor: Instructor) -> tuple[float, str]:
+    """
+    성장 중인 강사 보너스 (v4-C)
+    - 다음 등급 조건의 80% 이상 달성 (단, 아직 승급 전) → +10점
+    """
+    progress, rule = _calc_grade_progress(instructor)
+    if rule is None:
+        return 0.0, ''
+    if progress >= 1.0:
+        # 승급 가능 상태인 강사는 별도 시스템(grade_service)에서 처리
+        return 0.0, ''
+    if progress >= GROWTH_PROGRESS_THRESHOLD:
+        return GROWTH_BONUS, (
+            f"{rule['next']} 승급 {progress*100:.0f}% 달성 (성장 중) → +{GROWTH_BONUS:.0f}점"
+        )
+    return 0.0, ''
+
+
 # ─────────────────── 스코어링 컨텍스트 빌더 ────────────────────────────
 
 def _build_scoring_context(active_instructors: list[Instructor]) -> dict:
@@ -530,6 +680,18 @@ def calculate_match_score(
     new_value, new_reason = _calc_new_instructor_bonus(instructor)
     _add('신규 강사 보너스', new_value, new_reason)
 
+    # v4-A-1 강사-기관유형 상성 보너스
+    chem_value, chem_reason = _calc_org_chemistry_bonus(instructor, organization)
+    _add('상성 보너스', chem_value, chem_reason)
+
+    # v4-A-2 선호/비선호 기관 유형
+    pref_value, pref_reason = _calc_preference_bonus(instructor, organization)
+    _add('선호 기관 보너스/패널티', pref_value, pref_reason)
+
+    # v4-C 성장 중인 강사 보너스
+    growth_value, growth_reason = _calc_growth_bonus(instructor)
+    _add('성장 강사 보너스', growth_value, growth_reason)
+
     # ── 총점 ────────────────────────────────────────────────────
     bonus_sum = sum(b['점수'] for b in bonuses)
     penalty_sum = sum(p['점수'] for p in penalties)  # 이미 음수
@@ -614,6 +776,101 @@ def _is_excluded_by_schedule(
     return _has_date_conflict(instructor, request)
 
 
+# ─────────────── v4-D: 매칭 실패 원인 분석 ─────────────────────────────
+
+# 실패 원인 코드 → 사람 친화 메시지
+FAILURE_REASON_MESSAGES = {
+    'no_region': '해당 권역(인접 권역 포함) 강사 없음',
+    'no_specialty': '전문분야 일치 강사 없음',
+    'no_cert': '전문분야 강의 가능 인증 등급 강사 없음',
+    'no_time': '시간대 조건 맞는 강사 없음',
+    'all_overloaded': '모든 강사 이번 달 강의 횟수 초과',
+    'no_active': '활동 중인 강사가 없음',
+}
+
+
+def _analyze_failure_reasons(
+    request: EducationRequest,
+    all_active: list[Instructor],
+    candidate_pool: list[Instructor],
+    result_count: int,
+    top_n: int,
+) -> list[dict]:
+    """
+    매칭 결과가 top_n 미만일 때 구체적인 실패 원인 산출.
+
+    반환: [{"code": str, "message": str}, ...] (중복 없음)
+    원인 진단 우선순위:
+      1. 활동 강사 0명
+      2. 모든 강사 부하초과 → 후보 풀이 비어있고 all_active 는 있음
+      3. 권역/분야/인증/시간 각 항목별 매칭 가능 강사 수가 0
+    """
+    reasons: list[dict] = []
+
+    def _add(code: str, override_msg: str | None = None):
+        if any(r['code'] == code for r in reasons):
+            return
+        reasons.append({
+            'code': code,
+            'message': override_msg or FAILURE_REASON_MESSAGES.get(code, code),
+        })
+
+    if not all_active:
+        _add('no_active')
+        return reasons
+
+    # 부하초과로 모두 제외된 경우
+    if not candidate_pool:
+        _add('all_overloaded')
+        return reasons
+
+    specialty = request.specialty_needed
+    request_region = request.organization.region if request.organization else None
+    preferred_times = set(request.preferred_times or [])
+
+    # 권역 조건 (정확 일치 또는 인접)
+    if request_region:
+        region_ok = [
+            i for i in candidate_pool
+            if i.region == request_region or are_adjacent(i.region, request_region)
+            or (request_region in (i.travel_range or []))
+        ]
+        if not region_ok:
+            _add('no_region')
+
+    # 전문분야 (유사분야 포함)
+    if specialty:
+        group = set(_get_group_specialties(specialty))
+        specialty_ok = [
+            i for i in candidate_pool
+            if specialty in (i.specialties or [])
+            or set(i.specialties or []) & group
+        ]
+        if not specialty_ok:
+            _add('no_specialty')
+
+        # 인증 등급으로 가능한 강사 0명
+        cert_ok = [i for i in candidate_pool if _is_cert_eligible(i, specialty)]
+        if not cert_ok:
+            _add('no_cert')
+
+    # 시간대
+    if preferred_times:
+        time_ok = [
+            i for i in candidate_pool
+            if set(i.available_times or []) & preferred_times
+        ]
+        if not time_ok:
+            _add('no_time')
+
+    # 결과는 있지만 부족한 경우 → 일반적 부족 사유 추가
+    if not reasons and result_count < top_n:
+        _add('no_specialty', f'조건 부합 강사가 {result_count}명으로 {top_n}명 미만')
+
+    return reasons
+
+
+
 # ──────────── E항: 신규 강사 노출 보장 ────────────────────────────────
 
 def _ensure_new_instructor_slot(
@@ -678,12 +935,19 @@ def find_top_matches(request_id: int, top_n: int = 5) -> dict | None:
     # ── is_active=False 강사 완전 제외 ────────────────────────────
     all_active = Instructor.query.filter_by(is_active=True).all()
     if not all_active:
+        failure_reasons = [{
+            'code': 'no_active',
+            'message': FAILURE_REASON_MESSAGES['no_active'],
+        }]
+        request.failure_reasons = failure_reasons
+        db.session.commit()
         return {
             'matches': [],
             'match_mode': '강사없음',
             'match_mode_reason': '등록된 활성 강사가 없습니다.',
             'total_count': 0,
             'auto_excluded': [],
+            'failure_reasons': failure_reasons,
         }
 
     # ── 스코어링 컨텍스트 빌드 (이번 달 매칭 통계) ─────────────────
@@ -824,6 +1088,16 @@ def find_top_matches(request_id: int, top_n: int = 5) -> dict | None:
         saved_pairs.append((m, item))
 
     request.status = '완료'
+
+    # v4-D: top_n 미만 결과일 때 실패 원인 저장
+    failure_reasons: list[dict] = []
+    if len(saved_pairs) < top_n:
+        failure_reasons = _analyze_failure_reasons(
+            request, all_active, candidate_pool, len(saved_pairs), top_n,
+        )
+    # 결과가 5명 이상이면 이전에 저장된 실패 원인 초기화
+    request.failure_reasons = failure_reasons or None
+
     db.session.commit()
 
     # ── 응답 구성 ────────────────────────────────────────────────
@@ -852,4 +1126,6 @@ def find_top_matches(request_id: int, top_n: int = 5) -> dict | None:
         'match_mode_reason': match_mode_reason,
         'total_count': len(result_list),
         'auto_excluded': auto_excluded,
+        # v4-D: 5명 미만 매칭 시 실패 원인. 충분히 매칭됐을 땐 빈 리스트.
+        'failure_reasons': failure_reasons,
     }

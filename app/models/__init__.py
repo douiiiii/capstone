@@ -3,3 +3,4 @@ from .instructor import Instructor
 from .organization import Organization
 from .education_request import EducationRequest
 from .match import Match
+from .grade_history import GradeHistory

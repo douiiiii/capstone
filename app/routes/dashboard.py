@@ -179,3 +179,80 @@ def get_specialty_stats():
             'top_requested': top_requested,
         },
     })
+
+
+# ─────────────────────────────────────────────────────────────────────
+# v4-D: 매칭 실패 원인 통계
+# ─────────────────────────────────────────────────────────────────────
+
+# 실패 원인 노출 개수 (조정 필요 시 이 상수만 변경)
+FAILURE_TOP_N = 5
+
+
+@dashboard_bp.route('/dashboard/failure-stats', methods=['GET'])
+def get_failure_stats():
+    """
+    매칭 실패 패턴 통계
+
+    - 최근 매칭 시도 결과 중 EducationRequest.failure_reasons 가 비어있지 않은 건을 집계
+    - 가장 많은 실패 원인 Top N
+    - 권역별 실패 현황 (실패 사유가 있었던 요청 수)
+
+    응답 예시:
+      {
+        "success": true,
+        "data": {
+          "top_reasons": [
+            {"code": "no_region", "message": "...", "count": 8},
+            ...
+          ],
+          "by_region": [
+            {"region": "남부권", "failed_request_count": 3},
+            ...
+          ],
+          "total_failed_requests": 11
+        }
+      }
+    """
+    # failure_reasons 가 있는 요청만 조회
+    failed_requests = [
+        r for r in EducationRequest.query.all()
+        if r.failure_reasons
+    ]
+
+    # 원인 코드별 카운트
+    reason_counter = Counter()
+    reason_messages: dict[str, str] = {}
+    for req in failed_requests:
+        for reason in (req.failure_reasons or []):
+            code = reason.get('code')
+            if not code:
+                continue
+            reason_counter[code] += 1
+            # 사람-친화 메시지 보존 (마지막 발생값)
+            reason_messages[code] = reason.get('message', code)
+
+    top_reasons = [
+        {'code': code, 'message': reason_messages.get(code, code), 'count': cnt}
+        for code, cnt in reason_counter.most_common(FAILURE_TOP_N)
+    ]
+
+    # 권역별 실패 요청 수 (organization.region 기준)
+    region_counter = Counter()
+    for req in failed_requests:
+        org_region = (req.organization.region if req.organization else None) or '미지정'
+        region_counter[org_region] += 1
+
+    by_region = [
+        {'region': region, 'failed_request_count': cnt}
+        for region, cnt in sorted(region_counter.items())
+    ]
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'top_reasons': top_reasons,
+            'by_region': by_region,
+            'total_failed_requests': len(failed_requests),
+        },
+    })
