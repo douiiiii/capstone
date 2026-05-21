@@ -15,11 +15,13 @@ def create_app(config_name='default'):
     from .routes.requests import requests_bp
     from .routes.matches import matches_bp
     from .routes.dashboard import dashboard_bp
+    from .routes.map import map_bp
 
     app.register_blueprint(instructors_bp, url_prefix='/api')
     app.register_blueprint(requests_bp, url_prefix='/api')
     app.register_blueprint(matches_bp, url_prefix='/api')
     app.register_blueprint(dashboard_bp, url_prefix='/api')
+    app.register_blueprint(map_bp, url_prefix='/api')
 
     with app.app_context():
         # 모든 모델 import (테이블 생성을 위해 필요)
