@@ -13,7 +13,8 @@ class Instructor(db.Model):
     cert_level = db.Column(db.String(20))                   # 자격 수준 (기초, 중급, 전문가)
     available_days = db.Column(db.JSON)                     # 수업 가능 요일
     available_times = db.Column(db.JSON)                    # 수업 가능 시간대
-    max_classes_month = db.Column(db.Integer, default=4)    # 월 최대 수업 횟수
+    # 월 최대 수업 횟수 (v5.1 기본값 30, 강사가 10~40 범위에서 직접 설정 가능)
+    max_classes_month = db.Column(db.Integer, default=30)
     target_audience = db.Column(db.JSON)                    # 교육 가능 대상
     total_classes = db.Column(db.Integer, default=0)        # 누적 수업 수
     avg_rating = db.Column(db.Float, default=0.0)           # 평균 평점

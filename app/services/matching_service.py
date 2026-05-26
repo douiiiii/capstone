@@ -50,8 +50,16 @@ CONFIRMED_MATCH_STATUSES = ('수락', '확정', '완료')
 
 # ─────────────────────────────────────────────────────────
 # 신규 강사 기준 (누적 강의 횟수)
+# v5.1: 5회 → 10회로 상향
 # ─────────────────────────────────────────────────────────
-NEW_INSTRUCTOR_THRESHOLD = 5
+NEW_INSTRUCTOR_THRESHOLD = 10
+
+# ─────────────────────────────────────────────────────────
+# 강사가 직접 설정할 수 있는 월 최대 강의 횟수 범위 (v5.1)
+# 기본값은 Instructor 모델의 default(30) 를 사용한다.
+# ─────────────────────────────────────────────────────────
+MAX_CLASSES_MONTH_MIN = 10
+MAX_CLASSES_MONTH_MAX = 40
 
 
 # ───────────────────────────── 보조 유틸 ──────────────────────────────
@@ -79,7 +87,7 @@ def _months_since(target: date) -> int:
 
 
 def _is_new_instructor(instructor: Instructor) -> bool:
-    """누적 강의 5회 미만이면 신규 강사"""
+    """누적 강의 NEW_INSTRUCTOR_THRESHOLD 미만이면 신규 강사 (v5.1: 10회 미만)"""
     return (instructor.total_classes or 0) < NEW_INSTRUCTOR_THRESHOLD
 
 
@@ -325,17 +333,15 @@ def _calc_prior_match_bonus(
 # ─────────────── C항: 강사 부하 분산 ──────────────────────────────────
 
 def _count_this_month_confirmed(instructor: Instructor, today: date) -> int:
-    """이번 달 확정/수락 상태 매칭 횟수"""
-    return (
-        Match.query
-        .filter(
-            Match.instructor_id == instructor.id,
-            Match.status.in_(CONFIRMED_MATCH_STATUSES),
-            db.extract('year', Match.created_at) == today.year,
-            db.extract('month', Match.created_at) == today.month,
-        )
-        .count()
-    )
+    """
+    이번 달 강사가 진행할/진행한 활성 세션 수.
+
+    v5.1: matches 카운트 대신 class_sessions(예정+완료) 카운트.
+    정기 강의 1건이어도 실제 세션 수만큼 카운트되어 부하 분산 정확도가 향상됨.
+    """
+    # 순환 임포트를 피하기 위해 함수 내부에서 import
+    from app.services.class_session_service import count_sessions_in_month
+    return count_sessions_in_month(instructor.id, today.year, today.month)
 
 
 def _calc_load_penalty(
@@ -392,27 +398,23 @@ def _has_date_conflict(
     instructor: Instructor, request: EducationRequest,
 ) -> bool:
     """
-    이미 확정된 매칭 일정과 충돌하는지 (D-3)
-    confirmed 상태인 다른 요청의 preferred_dates 와 교집합이 있으면 True
+    이미 잡혀있는 강의 세션과 (날짜 + 시간대) 가 겹치는지 검사 (D-3 / v5.1).
+
+    v5.1: preferred_dates 단순 비교 → class_sessions(예정/완료) 기반 비교로 강화.
+    같은 날짜라도 시간대(오전/오후/저녁)가 다르면 충돌로 보지 않음.
     """
-    req_dates = set(request.preferred_dates or [])
-    if not req_dates:
+    # 순환 임포트를 피하기 위해 함수 내부에서 import
+    from app.services.class_session_service import has_schedule_conflict
+
+    pref_dates = request.preferred_dates or []
+    pref_times = request.preferred_times or []
+    if not pref_dates or not pref_times:
         return False
-    confirmed = (
-        Match.query
-        .filter(
-            Match.instructor_id == instructor.id,
-            Match.status.in_(CONFIRMED_MATCH_STATUSES),
-            Match.request_id != request.id,
-        )
-        .all()
+    return has_schedule_conflict(
+        instructor.id, pref_dates, pref_times,
+        # 자기 자신의 매칭(같은 request) 세션은 충돌 대상에서 제외
+        exclude_match_id=None,
     )
-    for m in confirmed:
-        other = m.request
-        if other and other.preferred_dates:
-            if req_dates & set(other.preferred_dates):
-                return True
-    return False
 
 
 # ─────────────── E항: 신규 강사 노출 보장 ─────────────────────────────
@@ -521,15 +523,16 @@ def _calc_preference_bonus(
 # ─────────────── v4-C: 강사 성장 추적 (성장 보너스만 매칭에 반영) ──────
 
 # 등급 자동 업그레이드 기준 (grade_service 와 공유 — 수정 시 동기화)
+# v5.1 기준 상향: 기초→중급 10→20회, 중급→전문가 30→60회
 GRADE_UPGRADE_RULES = {
     '기초': {
         'next': '중급',
-        'min_classes': 10,
+        'min_classes': 20,
         'min_rating': 4.0,
     },
     '중급': {
         'next': '전문가',
-        'min_classes': 30,
+        'min_classes': 60,
         'min_rating': 4.5,
     },
 }

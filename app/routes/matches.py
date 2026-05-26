@@ -3,6 +3,11 @@ from flask import Blueprint, jsonify, request
 from app.extensions import db
 from app.models.education_request import EducationRequest
 from app.models.match import Match
+from app.services.class_session_service import (
+    create_sessions_for_match,
+    mark_match_sessions_completed,
+    recalculate_total_classes,
+)
 from app.services.matching_engine import run_matching
 from app.services.matching_service import find_top_matches
 from app.services.ml_logger import mark_selection, record_feedback
@@ -141,6 +146,10 @@ def select_match():
             Match.id != selected_match.id,
         ).update({'status': '거절'})
         db.session.commit()
+        # v5.1: 확정 매칭에 대한 강의 세션 자동 생성
+        #   - 1회성 강의 → 1개
+        #   - 정기 강의   → frequency/기간에 맞춰 N개
+        create_sessions_for_match(selected_match)
 
     result = mark_selection(request_id, instructor_id, reasons)
     return jsonify({
@@ -193,6 +202,14 @@ def submit_feedback():
         if was_conducted:
             selected_match.status = '완료'
         db.session.commit()
+        # v5.1: 강의 완료 시 세션도 '완료' 로 갱신하고 누적 강의 횟수 재계산
+        if was_conducted and selected_match.request is not None:
+            # 확정 절차 없이 곧바로 피드백이 들어오는 경우를 대비해 세션을 보강 생성
+            create_sessions_for_match(selected_match, commit=False)
+            mark_match_sessions_completed(selected_match, commit=False)
+            if selected_match.instructor:
+                recalculate_total_classes(selected_match.instructor, commit=False)
+            db.session.commit()
 
     log = record_feedback(request_id, instructor_id, satisfaction, was_conducted)
     if not log:

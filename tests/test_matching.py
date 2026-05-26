@@ -641,13 +641,14 @@ class TestTieBreaking:
 
     def test_동점_같은평점_누적강의많은순(self, app, org_east):
         # 평점 동일, 누적 강의 수 다름
+        # v5.1 기준 상향(신규 강사 < 10회)을 반영해 두 강사 모두 10회 이상으로 설정
         inst_more = _make_instructor(
             name='많은강의', region='동부권', specialties=['AI기초'],
             avg_rating=4.7, total_classes=50,
         )
         inst_less = _make_instructor(
             name='적은강의', region='동부권', specialties=['AI기초'],
-            avg_rating=4.7, total_classes=5,
+            avg_rating=4.7, total_classes=15,
         )
         req = _make_request(org_east, specialty='AI기초', preferred_times=['오전'])
 
@@ -742,15 +743,21 @@ class TestActivityPenaltyInScore:
 # ════════════════════════════════════════════════════════════════════
 
 def _make_past_request(org, specialty='AI기초'):
-    """과거 교육 요청 (만족도 평가 시 사용)"""
+    """
+    과거 교육 요청 (만족도 평가/부하 분산 테스트용).
+    v5.1: preferred_dates 를 오늘 날짜로 두어 _make_match 가 자동 생성하는
+    class_session 이 '이번 달' 카운트에 포함되도록 함.
+    """
     req = EducationRequest(
         org_id=org.id,
         specialty_needed=specialty,
         target_audience='성인',
         expected_students=10,
-        preferred_dates=['2026-01-01'],
+        preferred_dates=[date.today().isoformat()],
         preferred_times=['오전'],
-        frequency='주 1회',
+        # v5.1: 1회성으로 두어 _make_match 가 정확히 세션 1개만 생성하게 함
+        # (날짜 의존적 테스트 변동을 막기 위함)
+        frequency='1회성',
         location_type='대면',
         status='완료',
     )
@@ -766,7 +773,10 @@ def _make_match(
     created_at=None,
     match_score=80.0,
 ):
-    """과거 매칭 레코드 생성 (피드백/부하 분산 테스트용)"""
+    """
+    과거 매칭 레코드 생성 (피드백/부하 분산 테스트용).
+    v5.1: 확정 계열 상태(수락/확정/완료) 면 class_session 도 함께 자동 생성.
+    """
     m = Match(
         request_id=request.id,
         instructor_id=instructor.id,
@@ -781,6 +791,9 @@ def _make_match(
     )
     db.session.add(m)
     db.session.commit()
+    # v5.1: 매칭에 대응하는 강의 세션 자동 생성 (부하/충돌 검사가 세션 기반이라 필요)
+    from app.services.class_session_service import create_sessions_for_match
+    create_sessions_for_match(m)
     return m
 
 

@@ -5,3 +5,4 @@ from .education_request import EducationRequest
 from .match import Match
 from .grade_history import GradeHistory
 from .ml_training_log import MLTrainingLog
+from .class_session import ClassSession

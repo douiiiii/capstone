@@ -222,36 +222,37 @@ class TestBreakdownContainsChemistry:
 
 class TestGrowthBonus:
     def test_80퍼_달성_10점(self, app):
-        # 기초 → 중급: 10회+4.0
-        # 80% = 8회 / 평점 3.2 부근 → 강의 9회, 평점 4.0 (강의 90%, 평점 100%) 진척률 0.9
+        # v5.1: 기초 → 중급 = 20회+4.0
+        # 강의 18회(90%), 평점 4.0(100%) → 진척률 0.9 → 성장 중
         inst = _make_instructor(
             cert_level='기초', specialties=['AI기초'],
-            total_classes=9, avg_rating=4.0,
+            total_classes=18, avg_rating=4.0,
         )
         bonus, reason = _calc_growth_bonus(inst)
         assert bonus == 10.0
         assert '중급' in reason
 
     def test_조건_충족이면_성장보너스_0(self, app):
-        """100% 달성 → 승급 대상이므로 성장 보너스는 주지 않음"""
+        """100% 달성 → 승급 대상이므로 성장 보너스는 주지 않음 (v5.1: 20회 기준)"""
         inst = _make_instructor(
             cert_level='기초', specialties=['AI기초'],
-            total_classes=12, avg_rating=4.3,
+            total_classes=22, avg_rating=4.3,
         )
         bonus, _ = _calc_growth_bonus(inst)
         assert bonus == 0.0
 
     def test_전문가는_성장보너스_없음(self, app):
-        inst = _make_instructor(cert_level='전문가', total_classes=50, avg_rating=4.9)
+        inst = _make_instructor(cert_level='전문가', total_classes=80, avg_rating=4.9)
         bonus, _ = _calc_growth_bonus(inst)
         assert bonus == 0.0
 
 
 class TestGradeAutoUpgrade:
     def test_기초_중급_자동_승급(self, app):
+        # v5.1: 기초 → 중급 = 20회+4.0
         inst = _make_instructor(
             cert_level='기초', specialties=['AI기초'],
-            total_classes=12, avg_rating=4.3,
+            total_classes=22, avg_rating=4.3,
         )
         history = upgrade_instructor(inst)
         assert history is not None
@@ -264,9 +265,10 @@ class TestGradeAutoUpgrade:
         assert len(all_history) == 1
 
     def test_조건_미달이면_승급_없음(self, app):
+        # v5.1: 기초 → 중급 기준 20회. 18회면 미달
         inst = _make_instructor(
             cert_level='기초', specialties=['AI기초'],
-            total_classes=8, avg_rating=4.5,
+            total_classes=18, avg_rating=4.5,
         )
         result = upgrade_instructor(inst)
         assert result is None
@@ -274,20 +276,21 @@ class TestGradeAutoUpgrade:
         assert GradeHistory.query.count() == 0
 
     def test_중급_전문가_승급(self, app):
+        # v5.1: 중급 → 전문가 = 60회+4.5
         inst = _make_instructor(
             cert_level='중급', specialties=['챗GPT'],
-            total_classes=30, avg_rating=4.5,
+            total_classes=60, avg_rating=4.5,
         )
         history = upgrade_instructor(inst)
         assert history is not None
         assert inst.cert_level == '전문가'
 
     def test_bulk_upgrade_전체(self, app):
-        # 승급 가능 강사 2명 + 미달 1명
-        _make_instructor(name='승급1', cert_level='기초', total_classes=10, avg_rating=4.0)
+        # 승급 가능 강사 2명 + 미달 1명 (v5.1 기준)
+        _make_instructor(name='승급1', cert_level='기초', total_classes=20, avg_rating=4.0)
         _make_instructor(name='승급2', cert_level='중급', specialties=['챗GPT'],
-                         total_classes=30, avg_rating=4.5)
-        _make_instructor(name='미달', cert_level='기초', total_classes=5, avg_rating=4.0)
+                         total_classes=60, avg_rating=4.5)
+        _make_instructor(name='미달', cert_level='기초', total_classes=10, avg_rating=4.0)
 
         upgraded = bulk_upgrade_all()
         assert len(upgraded) == 2
@@ -297,8 +300,9 @@ class TestGradeAutoUpgrade:
 
 class TestEligibilityCheck:
     def test_eligibility_정보(self, app):
+        # v5.1: 기초 → 중급 = 20회+4.0. 18회/4.0 → 진척률 0.9
         inst = _make_instructor(
-            cert_level='기초', total_classes=9, avg_rating=4.0,
+            cert_level='기초', total_classes=18, avg_rating=4.0,
         )
         info = check_eligibility(inst)
         assert info['current_grade'] == '기초'
@@ -356,13 +360,13 @@ class TestAdminEndpoints:
         assert 'cert_level_updated_at' in body['data'][0]
 
     def test_growth_endpoint(self, client, app):
-        # 성장 중인 강사 1명, 충족 1명, 무관 1명
+        # v5.1: 기초→중급 = 20회+4.0. 성장 중 1명, 충족 1명, 무관 1명
         _make_instructor(name='성장중', cert_level='기초',
-                         total_classes=9, avg_rating=4.0)
+                         total_classes=18, avg_rating=4.0)
         _make_instructor(name='충족', cert_level='기초',
-                         total_classes=12, avg_rating=4.3)
+                         total_classes=22, avg_rating=4.3)
         _make_instructor(name='전문가', cert_level='전문가',
-                         total_classes=50, avg_rating=4.9)
+                         total_classes=80, avg_rating=4.9)
 
         res = client.get(
             '/api/admin/growth',
@@ -375,7 +379,8 @@ class TestAdminEndpoints:
         assert '전문가' not in names
 
     def test_grade_history_endpoint(self, client, app):
-        inst = _make_instructor(cert_level='기초', total_classes=12, avg_rating=4.3)
+        # v5.1: 기초→중급 기준 20회
+        inst = _make_instructor(cert_level='기초', total_classes=22, avg_rating=4.3)
         upgrade_instructor(inst)
 
         res = client.get(
@@ -387,8 +392,9 @@ class TestAdminEndpoints:
         assert body['data'][0]['to_grade'] == '중급'
 
     def test_grade_upgrade_post(self, client, app):
+        # v5.1: 기초→중급 기준 20회
         _make_instructor(name='승급', cert_level='기초',
-                         total_classes=12, avg_rating=4.3)
+                         total_classes=22, avg_rating=4.3)
         res = client.post(
             '/api/admin/grade-upgrade',
             headers={'X-Admin-Token': ADMIN_TOKEN},
