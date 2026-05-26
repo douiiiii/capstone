@@ -76,42 +76,42 @@ def test_1():
         instructors = [
             # 강사A: 4.9점 평점 → +10보너스, 최근 활동
             Instructor(name='강사A', region='동부권', travel_range=['동부권'],
-                       specialties=['AI기초'], cert_level='전문가',
+                       specialties=['AI기초'], cert_level=3,
                        available_days=['월','화','수'], available_times=['오전'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=30, avg_rating=4.9,
                        last_active=date(2026,5,1), is_active=True),
             # 강사B: 4.6점 → +5보너스, 강사C와 동점 → 평점으로 앞서기
             Instructor(name='강사B', region='동부권', travel_range=['동부권'],
-                       specialties=['AI기초'], cert_level='전문가',
+                       specialties=['AI기초'], cert_level=3,
                        available_days=['월','화','수'], available_times=['오전'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=20, avg_rating=4.6,
                        last_active=date(2026,5,1), is_active=True),
             # 강사C: 기초 cert (AI기초 가능), 4.5점 → +5보너스, 강사B와 동점
             Instructor(name='강사C', region='동부권', travel_range=['동부권'],
-                       specialties=['AI기초'], cert_level='기초',
+                       specialties=['AI기초'], cert_level=1,
                        available_days=['월','화','수'], available_times=['오전'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=20, avg_rating=4.5,
                        last_active=date(2026,5,1), is_active=True),
             # 강사D: 4.3점 → 보너스 없음
             Instructor(name='강사D', region='동부권', travel_range=['동부권'],
-                       specialties=['AI기초'], cert_level='전문가',
+                       specialties=['AI기초'], cert_level=3,
                        available_days=['월','화','수'], available_times=['오전'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=15, avg_rating=4.3,
                        last_active=date(2026,5,1), is_active=True),
             # 강사E: 9개월 전 활동 → -10점 패널티
             Instructor(name='강사E', region='동부권', travel_range=['동부권'],
-                       specialties=['AI기초'], cert_level='전문가',
+                       specialties=['AI기초'], cert_level=3,
                        available_days=['월','화','수'], available_times=['오전'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=25, avg_rating=4.6,
                        last_active=date(2025,8,1), is_active=True),
             # 강사F: 비활성 → 결과 제외
             Instructor(name='강사F', region='동부권', travel_range=['동부권'],
-                       specialties=['AI기초'], cert_level='전문가',
+                       specialties=['AI기초'], cert_level=3,
                        available_days=['월','화','수'], available_times=['오전'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=50, avg_rating=5.0,
@@ -124,7 +124,7 @@ def test_1():
             org_id=org.id, specialty_needed='AI기초',
             target_audience='성인', expected_students=20,
             preferred_dates=['2026-06-01'], preferred_times=['오전'],
-            frequency='주 1회', location_type='대면', status='대기중',
+            frequency='주 1회', location_type='대면', status='대기',
         )
         db.session.add(req)
         db.session.commit()
@@ -187,7 +187,7 @@ def test_2():
         for name, rating, classes in data:
             inst = Instructor(
                 name=name, region='서부권', travel_range=['서부권'],
-                specialties=['코딩교육'], cert_level='전문가',
+                specialties=['코딩교육'], cert_level=3,
                 available_days=['월','화','수'], available_times=['오후'],
                 max_classes_month=6, target_audience=['성인'],
                 total_classes=classes, avg_rating=rating,
@@ -201,7 +201,7 @@ def test_2():
             org_id=org.id, specialty_needed='코딩교육',
             target_audience='성인', expected_students=15,
             preferred_dates=['2026-06-01'], preferred_times=['오후'],
-            frequency='주 1회', location_type='대면', status='대기중',
+            frequency='주 1회', location_type='대면', status='대기',
         )
         db.session.add(req)
         db.session.commit()
@@ -250,21 +250,21 @@ def test_3():
         instructors = [
             Instructor(name='북부권강사1', region='북부권',
                        travel_range=['북부권','서부권','중부권'],
-                       specialties=['앱개발'], cert_level='전문가',
+                       specialties=['앱개발'], cert_level=3,
                        available_days=['월','화'], available_times=['오후'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=40, avg_rating=4.8,
                        last_active=date(2026,5,5), is_active=True),
             Instructor(name='북부권강사2', region='북부권',
                        travel_range=['북부권','중부권'],
-                       specialties=['앱개발','웹개발'], cert_level='전문가',
+                       specialties=['앱개발','웹개발'], cert_level=3,
                        available_days=['화','수'], available_times=['오후'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=25, avg_rating=4.5,
                        last_active=date(2026,5,3), is_active=True),
             Instructor(name='중부권강사1', region='중부권',
                        travel_range=['중부권','서부권','북부권'],
-                       specialties=['앱개발'], cert_level='전문가',
+                       specialties=['앱개발'], cert_level=3,
                        available_days=['월','수'], available_times=['오후'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=30, avg_rating=4.7,
@@ -277,7 +277,7 @@ def test_3():
             org_id=org.id, specialty_needed='앱개발',
             target_audience='성인', expected_students=12,
             preferred_dates=['2026-06-01'], preferred_times=['오후'],
-            frequency='격주', location_type='대면', status='대기중',
+            frequency='격주', location_type='대면', status='대기',
         )
         db.session.add(req)
         db.session.commit()
@@ -320,14 +320,14 @@ def test_4():
             # 전문분야 불일치 (영상편집·SNS = 다른 그룹) → specialty=0
             Instructor(name='전문가A', region='북부권',
                        travel_range=['북부권'],
-                       specialties=['영상편집'], cert_level='전문가',
+                       specialties=['영상편집'], cert_level=3,
                        available_days=['월','화'], available_times=['오전'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=30, avg_rating=4.9,
                        last_active=date(2026,5,1), is_active=True),
             Instructor(name='전문가B', region='북부권',
                        travel_range=['북부권'],
-                       specialties=['SNS활용'], cert_level='전문가',
+                       specialties=['SNS활용'], cert_level=3,
                        available_days=['월','화'], available_times=['오전'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=20, avg_rating=4.7,
@@ -339,21 +339,21 @@ def test_4():
             # → 조건완화 후보로 specialty=20(유사분야) 점수 부여
             Instructor(name='기초강사A', region='북부권',
                        travel_range=['북부권'],
-                       specialties=['AI기초'], cert_level='기초',
+                       specialties=['AI기초'], cert_level=1,
                        available_days=['월','화'], available_times=['오전'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=15, avg_rating=4.8,
                        last_active=date(2026,5,1), is_active=True),
             Instructor(name='기초강사B', region='중부권',
                        travel_range=['중부권','북부권'],
-                       specialties=['AI기초'], cert_level='기초',
+                       specialties=['AI기초'], cert_level=1,
                        available_days=['월','화'], available_times=['오전'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=10, avg_rating=4.5,
                        last_active=date(2026,5,1), is_active=True),
             Instructor(name='기초강사C', region='서부권',
                        travel_range=['서부권','북부권'],
-                       specialties=['AI기초'], cert_level='기초',
+                       specialties=['AI기초'], cert_level=1,
                        available_days=['월','화'], available_times=['오전'],
                        max_classes_month=4, target_audience=['성인'],
                        total_classes=8, avg_rating=4.5,
@@ -366,7 +366,7 @@ def test_4():
             org_id=org.id, specialty_needed='챗GPT',
             target_audience='성인', expected_students=10,
             preferred_dates=['2026-06-01'], preferred_times=['오전'],
-            frequency='주 1회', location_type='대면', status='대기중',
+            frequency='주 1회', location_type='대면', status='대기',
         )
         db.session.add(req)
         db.session.commit()

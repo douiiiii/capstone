@@ -134,12 +134,13 @@ def select_match():
     raw_reasons = data.get('not_selected_reasons') or {}
     reasons = {int(k): v for k, v in raw_reasons.items()}
 
-    # Match 테이블에도 선택 상태 반영 (status='확정')
+    # Match 테이블에도 선택 상태 반영 (status='최종확정')
+    # DB CHECK 제약: matches.status ∈ {'매칭제안','수락','거절','최종확정'}
     selected_match = Match.query.filter_by(
         request_id=request_id, instructor_id=instructor_id,
     ).first()
     if selected_match:
-        selected_match.status = '확정'
+        selected_match.status = '최종확정'
         # 다른 매칭은 거절로 표시
         Match.query.filter(
             Match.request_id == request_id,
@@ -200,7 +201,8 @@ def submit_feedback():
     if selected_match:
         selected_match.satisfaction_score = satisfaction
         if was_conducted:
-            selected_match.status = '완료'
+            # DB CHECK 제약상 '완료' 불가 → '최종확정' 으로 통일
+            selected_match.status = '최종확정'
         db.session.commit()
         # v5.1: 강의 완료 시 세션도 '완료' 로 갱신하고 누적 강의 횟수 재계산
         if was_conducted and selected_match.request is not None:

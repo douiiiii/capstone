@@ -48,7 +48,7 @@ def seeded(app):
     insts = [
         Instructor(
             name='강사A', region='동부권', travel_range=['동부권'],
-            specialties=['AI기초', '챗GPT'], cert_level='전문가',
+            specialties=['AI기초', '챗GPT'], cert_level=3,
             available_days=['월'], available_times=['오전'],
             max_classes_month=4, target_audience=['성인'],
             total_classes=10, avg_rating=4.8,
@@ -56,7 +56,7 @@ def seeded(app):
         ),
         Instructor(
             name='강사B', region='동부권', travel_range=['동부권'],
-            specialties=['AI기초'], cert_level='기초',
+            specialties=['AI기초'], cert_level=1,
             available_days=['화'], available_times=['오후'],
             max_classes_month=4, target_audience=['시니어'],
             total_classes=5, avg_rating=4.2,
@@ -64,7 +64,7 @@ def seeded(app):
         ),
         Instructor(
             name='강사C', region='서부권', travel_range=['서부권'],
-            specialties=['코딩교육'], cert_level='전문가',
+            specialties=['코딩교육'], cert_level=3,
             available_days=['수'], available_times=['저녁'],
             max_classes_month=4, target_audience=['청소년'],
             total_classes=8, avg_rating=4.5,
@@ -72,7 +72,7 @@ def seeded(app):
         ),
         Instructor(
             name='강사D-비활동', region='북부권', travel_range=['북부권'],
-            specialties=['스마트폰활용'], cert_level='기초',
+            specialties=['스마트폰활용'], cert_level=1,
             available_days=['목'], available_times=['오전'],
             max_classes_month=4, target_audience=['시니어'],
             total_classes=2, avg_rating=3.9,
@@ -100,7 +100,7 @@ def seeded(app):
             org_id=org_e.id, specialty_needed='AI기초', target_audience='시니어',
             expected_students=8, preferred_dates=['2026-06-02'],
             preferred_times=['오후'], frequency='주 1회', location_type='대면',
-            status='대기중',
+            status='대기',
         ),
         EducationRequest(
             org_id=org_w.id, specialty_needed='코딩교육', target_audience='청소년',
@@ -118,7 +118,7 @@ def seeded(app):
             org_id=org_s.id, specialty_needed='스마트폰활용', target_audience='시니어',
             expected_students=20, preferred_dates=['2026-06-05'],
             preferred_times=['오전'], frequency='주 1회', location_type='대면',
-            status='대기중',
+            status='대기',
         ),
     ]
     db.session.add_all(reqs)
@@ -238,7 +238,7 @@ class TestDashboardSpecialty:
                 org_id=org.id, specialty_needed=s, target_audience='성인',
                 expected_students=1, preferred_dates=['2026-06-01'],
                 preferred_times=['오전'], frequency='주 1회', location_type='대면',
-                status='대기중',
+                status='대기',
             ))
         db.session.commit()
 

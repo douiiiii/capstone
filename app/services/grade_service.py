@@ -71,7 +71,8 @@ def upgrade_instructor(instructor: Instructor, commit: bool = True) -> GradeHist
     충족하지 않으면 None 반환.
     commit=False 일 경우 호출자가 일괄 commit.
     """
-    rule = GRADE_UPGRADE_RULES.get(instructor.cert_level or '')
+    # cert_level 정수화: None 대비 0 fallback
+    rule = GRADE_UPGRADE_RULES.get(instructor.cert_level or 0)
     if not rule:
         return None
 

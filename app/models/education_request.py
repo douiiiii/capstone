@@ -15,7 +15,8 @@ class EducationRequest(db.Model):
     preferred_times = db.Column(db.JSON)            # 선호 시간대 목록
     frequency = db.Column(db.String(20))            # 수업 빈도 (주 1회, 격주 등)
     location_type = db.Column(db.String(20))        # 수업 방식 (대면, 온라인, 혼합)
-    status = db.Column(db.String(20), default='대기중')  # 요청 상태
+    # 요청 상태 — DB CHECK 제약: {'대기', '매칭중', '완료'}
+    status = db.Column(db.String(20), default='대기')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # v4.0: 매칭 실패 원인 (find_top_matches 결과가 5명 미만일 때 저장)

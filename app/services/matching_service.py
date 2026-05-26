@@ -33,20 +33,23 @@ SPECIALTY_GROUPS = {
 
 # ─────────────────────────────────────────────────────────
 # 인증 등급별 강의 가능 전문 분야
-#   - '전문가' 또는 미설정: None (모든 분야 가능)
-#   - '중급': 기초 분야 + 챗GPT, 데이터분석, 코딩교육
-#   - '기초': AI기초, 스마트폰활용만 가능
+#   - 3(전문가) 또는 미설정: 제한 없음 (모든 분야 가능)
+#   - 2(중급): 기초 분야 + 챗GPT, 데이터분석, 코딩교육
+#   - 1(기초): AI기초, 스마트폰활용만 가능
+# cert_level 은 정수(1/2/3)로 통일 — 키 타입을 int 로 사용.
 # ─────────────────────────────────────────────────────────
-CERT_ALLOWED_SPECIALTIES: dict[str, set[str]] = {
-    '기초': {'AI기초', '스마트폰활용'},
-    '중급': {'AI기초', '스마트폰활용', '챗GPT', '데이터분석', '코딩교육'},
+CERT_ALLOWED_SPECIALTIES: dict[int, set[str]] = {
+    1: {'AI기초', '스마트폰활용'},
+    2: {'AI기초', '스마트폰활용', '챗GPT', '데이터분석', '코딩교육'},
 }
 
 # ─────────────────────────────────────────────────────────
 # 확정으로 간주할 매칭 상태
 # (이번 달 강의 횟수·일정 충돌 계산 시 사용)
+# DB CHECK 제약: matches.status ∈ {'매칭제안','수락','거절','최종확정'}
+# 기존 코드의 '확정'/'완료' 를 DB 표준값 '최종확정' 으로 통일.
 # ─────────────────────────────────────────────────────────
-CONFIRMED_MATCH_STATUSES = ('수락', '확정', '완료')
+CONFIRMED_MATCH_STATUSES = ('수락', '최종확정')
 
 # ─────────────────────────────────────────────────────────
 # 신규 강사 기준 (누적 강의 횟수)
@@ -293,7 +296,8 @@ def _calc_org_type_bonus(
         return 0.0, f'기관유형=학교지만 누적 강의 부족({instructor.total_classes or 0}회)'
 
     if '기업' in org_type or '회사' in org_type:
-        if instructor.cert_level == '전문가':
+        # cert_level 정수화: 3(전문가) 비교
+        if instructor.cert_level == 3:
             return 10.0, '기관유형=기업 + 전문가 인증 → +10점'
         return 0.0, f'기관유형=기업이지만 인증 등급 부족({instructor.cert_level})'
 
@@ -524,18 +528,22 @@ def _calc_preference_bonus(
 
 # 등급 자동 업그레이드 기준 (grade_service 와 공유 — 수정 시 동기화)
 # v5.1 기준 상향: 기초→중급 10→20회, 중급→전문가 30→60회
+# cert_level 정수화에 맞춰 키/next 값을 정수로 변경
+# 1=기초, 2=중급, 3=전문가
 GRADE_UPGRADE_RULES = {
-    '기초': {
-        'next': '중급',
+    1: {  # 기초 → 중급
+        'next': 2,
         'min_classes': 20,
         'min_rating': 4.0,
     },
-    '중급': {
-        'next': '전문가',
+    2: {  # 중급 → 전문가
+        'next': 3,
         'min_classes': 60,
         'min_rating': 4.5,
     },
 }
+# 사용자 표시용 등급명 매핑 (정수 → 한글 명칭)
+GRADE_NAMES = {1: '기초', 2: '중급', 3: '전문가'}
 # 성장 보너스: 다음 등급 조건의 80% 이상 달성 시 +10
 GROWTH_PROGRESS_THRESHOLD = 0.8
 GROWTH_BONUS = 10.0
@@ -546,7 +554,8 @@ def _calc_grade_progress(instructor: Instructor) -> tuple[float, dict | None]:
     다음 등급까지의 진척률(0.0~1.0)과 기준 dict 반환.
     승급 기준이 없는 등급(전문가/미설정)은 (0.0, None).
     """
-    rule = GRADE_UPGRADE_RULES.get(instructor.cert_level or '')
+    # cert_level 정수화: None 대비 0 fallback (0은 RULES 에 없는 키)
+    rule = GRADE_UPGRADE_RULES.get(instructor.cert_level or 0)
     if not rule:
         return 0.0, None
     classes = instructor.total_classes or 0
@@ -569,8 +578,10 @@ def _calc_growth_bonus(instructor: Instructor) -> tuple[float, str]:
         # 승급 가능 상태인 강사는 별도 시스템(grade_service)에서 처리
         return 0.0, ''
     if progress >= GROWTH_PROGRESS_THRESHOLD:
+        # 표시용은 정수 대신 한글 등급명 사용 (예: 2 → '중급')
+        next_name = GRADE_NAMES.get(rule['next'], rule['next'])
         return GROWTH_BONUS, (
-            f"{rule['next']} 승급 {progress*100:.0f}% 달성 (성장 중) → +{GROWTH_BONUS:.0f}점"
+            f"{next_name} 승급 {progress*100:.0f}% 달성 (성장 중) → +{GROWTH_BONUS:.0f}점"
         )
     return 0.0, ''
 

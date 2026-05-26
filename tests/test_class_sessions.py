@@ -64,7 +64,7 @@ def org_east(app):
 
 def _make_instructor(
     name='강사', region='동부권', specialties=None,
-    cert_level='전문가', total_classes=15, avg_rating=4.5,
+    cert_level=3, total_classes=15, avg_rating=4.5,
     max_classes_month=None,
 ):
     inst = Instructor(
@@ -83,7 +83,7 @@ def _make_instructor(
 
 def _make_request(
     org, specialty='AI기초', preferred_dates=None,
-    preferred_times=None, frequency='주 1회', status='대기중',
+    preferred_times=None, frequency='주 1회', status='대기',
 ):
     req = EducationRequest(
         org_id=org.id, specialty_needed=specialty, target_audience='성인',
@@ -174,7 +174,7 @@ class TestSessionGeneration:
     def test_완료_매칭은_완료_세션으로_생성(self, app, org_east):
         inst = _make_instructor()
         req = _make_request(org_east, frequency='1회성')
-        m = _make_match(req, inst, status='완료')
+        m = _make_match(req, inst, status='최종확정')
         sessions = ClassSession.query.filter_by(match_id=m.id).all()
         assert len(sessions) == 1
         assert sessions[0].status == '완료'
@@ -203,7 +203,7 @@ class TestSessionGeneration:
         inst = _make_instructor()
         req = _make_request(
             org_east, preferred_dates=['2026-08-01'],
-            preferred_times=['오전'], frequency='1회성', status='대기중',
+            preferred_times=['오전'], frequency='1회성', status='대기',
         )
         m = Match(
             request_id=req.id, instructor_id=inst.id,
@@ -302,7 +302,7 @@ class TestScheduleConflict:
         current = _make_request(
             org_east, preferred_dates=['2026-06-01'],
             preferred_times=['오전'], frequency='정기 주 1회',
-            status='대기중',
+            status='대기',
         )
         result = find_top_matches(current.id)
         ids = [m['instructor_id'] for m in result['matches']]
@@ -325,7 +325,7 @@ class TestScheduleConflict:
         current = _make_request(
             org_east, preferred_dates=['2026-06-01'],
             preferred_times=['저녁'], frequency='정기 주 1회',
-            status='대기중',
+            status='대기',
         )
         # 직접 검사
         assert _has_date_conflict(inst, current) is False
@@ -341,7 +341,7 @@ class TestTotalClassesRecalc:
         # 3건 완료 매칭 (frequency=1회성) → 3 완료 세션
         for _ in range(3):
             req = _make_request(org_east, frequency='1회성')
-            _make_match(req, inst, status='완료')
+            _make_match(req, inst, status='최종확정')
 
         assert count_completed_sessions(inst.id) == 3
         recalculate_total_classes(inst)
@@ -369,7 +369,7 @@ class TestTotalClassesRecalc:
         # 정기 주 1회 (4 세션)
         req = _make_request(
             org_east, preferred_dates=['2026-09-01'],
-            preferred_times=['오전'], frequency='주 1회', status='대기중',
+            preferred_times=['오전'], frequency='주 1회', status='대기',
         )
         m = _make_match(req, inst, status='수락')
 
@@ -386,12 +386,12 @@ class TestTotalClassesRecalc:
 
 class TestThresholdAdjustments:
     def test_등급_승급_기초_중급_기준_20회(self, app):
-        rule = GRADE_UPGRADE_RULES['기초']
+        rule = GRADE_UPGRADE_RULES[1]
         assert rule['min_classes'] == 20
         assert rule['min_rating'] == 4.0
 
     def test_등급_승급_중급_전문가_기준_60회(self, app):
-        rule = GRADE_UPGRADE_RULES['중급']
+        rule = GRADE_UPGRADE_RULES[2]
         assert rule['min_classes'] == 60
         assert rule['min_rating'] == 4.5
 
@@ -406,7 +406,7 @@ class TestThresholdAdjustments:
         # Instructor 모델의 default 가 30
         inst = Instructor(
             name='기본강사', region='동부권', travel_range=['동부권'],
-            specialties=['AI기초'], cert_level='전문가',
+            specialties=['AI기초'], cert_level=3,
             available_days=['월'], available_times=['오전'],
             target_audience=['성인'], total_classes=0, avg_rating=4.5,
             last_active=date.today(), is_active=True,

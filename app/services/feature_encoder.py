@@ -71,10 +71,11 @@ ORG_TYPE_CODES = {
     '교육원': 9,
 }
 
+# cert_level 정수화: DB/모델이 이미 1/2/3 이므로 identity 매핑.
+# 호환 위해 기존 문자열 입력도 받아준다 (마이그레이션 안전망).
 CERT_LEVEL_CODES = {
-    '기초': 1,
-    '중급': 2,
-    '전문가': 3,
+    1: 1, 2: 2, 3: 3,
+    '기초': 1, '중급': 2, '전문가': 3,
 }
 
 TARGET_AUDIENCE_CODES = {
@@ -134,8 +135,12 @@ def encode_org_type(org_type: str | None) -> int:
     return ORG_TYPE_CODES.get(normalized, UNKNOWN_CODE)
 
 
-def encode_cert_level(cert: str | None) -> int:
-    return CERT_LEVEL_CODES.get(cert or '', UNKNOWN_CODE)
+def encode_cert_level(cert) -> int:
+    """cert_level 인코딩.
+    int(1/2/3) 또는 legacy 문자열('기초'/'중급'/'전문가') 모두 허용."""
+    if cert is None:
+        return UNKNOWN_CODE
+    return CERT_LEVEL_CODES.get(cert, UNKNOWN_CODE)
 
 
 def encode_audience(audience: str | None) -> int:

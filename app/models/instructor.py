@@ -10,7 +10,9 @@ class Instructor(db.Model):
     region = db.Column(db.String(20), nullable=False)       # 소속 권역 (동부권, 서부권 등)
     travel_range = db.Column(db.JSON)                       # 이동 가능 권역 목록
     specialties = db.Column(db.JSON)                        # 전문 분야 목록
-    cert_level = db.Column(db.String(20))                   # 자격 수준 (기초, 중급, 전문가)
+    # 자격 수준 — 실제 Supabase 컬럼은 integer 이므로 모델도 Integer 로 통일.
+    # 의미: 1=기초, 2=중급, 3=전문가 (NULL = 미지정)
+    cert_level = db.Column(db.Integer)
     available_days = db.Column(db.JSON)                     # 수업 가능 요일
     available_times = db.Column(db.JSON)                    # 수업 가능 시간대
     # 월 최대 수업 횟수 (v5.1 기본값 30, 강사가 10~40 범위에서 직접 설정 가능)

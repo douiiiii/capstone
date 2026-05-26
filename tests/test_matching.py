@@ -87,7 +87,7 @@ def _make_instructor(
     region='동부권',
     travel_range=None,
     specialties=None,
-    cert_level='전문가',
+    cert_level=3,
     available_times=None,
     avg_rating=4.5,
     total_classes=10,
@@ -128,7 +128,7 @@ def _make_request(org, specialty='AI기초', preferred_times=None):
         preferred_times=preferred_times or ['오전'],
         frequency='주 1회',
         location_type='대면',
-        status='대기중',
+        status='대기',
     )
     db.session.add(req)
     db.session.commit()
@@ -230,46 +230,46 @@ class TestCertEligibility:
     """테스트 3: 인증 등급에 따른 강의 가능 범위 제한"""
 
     def test_전문가_모든분야_가능(self, app):
-        inst = _make_instructor(cert_level='전문가')
+        inst = _make_instructor(cert_level=3)
         assert _is_cert_eligible(inst, 'AI기초') is True
         assert _is_cert_eligible(inst, '파이썬') is True
         assert _is_cert_eligible(inst, '영상편집') is True
 
     def test_기초_AI기초_가능(self, app):
-        inst = _make_instructor(cert_level='기초')
+        inst = _make_instructor(cert_level=1)
         assert _is_cert_eligible(inst, 'AI기초') is True
 
     def test_기초_스마트폰활용_가능(self, app):
-        inst = _make_instructor(cert_level='기초')
+        inst = _make_instructor(cert_level=1)
         assert _is_cert_eligible(inst, '스마트폰활용') is True
 
     def test_기초_챗GPT_불가(self, app):
-        inst = _make_instructor(cert_level='기초')
+        inst = _make_instructor(cert_level=1)
         assert _is_cert_eligible(inst, '챗GPT') is False
 
     def test_기초_코딩교육_불가(self, app):
-        inst = _make_instructor(cert_level='기초')
+        inst = _make_instructor(cert_level=1)
         assert _is_cert_eligible(inst, '코딩교육') is False
 
     def test_기초_파이썬_불가(self, app):
-        inst = _make_instructor(cert_level='기초')
+        inst = _make_instructor(cert_level=1)
         assert _is_cert_eligible(inst, '파이썬') is False
 
     def test_중급_코딩교육_가능(self, app):
-        inst = _make_instructor(cert_level='중급')
+        inst = _make_instructor(cert_level=2)
         assert _is_cert_eligible(inst, '코딩교육') is True
 
     def test_중급_데이터분석_가능(self, app):
-        inst = _make_instructor(cert_level='중급')
+        inst = _make_instructor(cert_level=2)
         assert _is_cert_eligible(inst, '데이터분석') is True
 
     def test_중급_파이썬_불가(self, app):
         # 파이썬은 중급 허용 목록에 없음 → 전문가 필요
-        inst = _make_instructor(cert_level='중급')
+        inst = _make_instructor(cert_level=2)
         assert _is_cert_eligible(inst, '파이썬') is False
 
     def test_중급_영상편집_불가(self, app):
-        inst = _make_instructor(cert_level='중급')
+        inst = _make_instructor(cert_level=2)
         assert _is_cert_eligible(inst, '영상편집') is False
 
 
@@ -279,22 +279,22 @@ class TestCertEligibleForSimilar:
     """테스트 4: 조건 완화 시 유사분야 인증 등급 확인"""
 
     def test_전문가_항상_가능(self, app):
-        inst = _make_instructor(cert_level='전문가', specialties=['파이썬'])
+        inst = _make_instructor(cert_level=3, specialties=['파이썬'])
         assert _is_cert_eligible_for_similar(inst, '코딩교육') is True
 
     def test_기초_유사분야_허용분야_있으면_가능(self, app):
         # 기초 cert → AI기초 가능. '데이터분석' 요청 유사분야 = AI·디지털 그룹
         # 강사가 AI기초 보유 + 기초 cert가 AI기초 허용 → 유사 분야로 OK
-        inst = _make_instructor(cert_level='기초', specialties=['AI기초'])
+        inst = _make_instructor(cert_level=1, specialties=['AI기초'])
         assert _is_cert_eligible_for_similar(inst, '데이터분석') is True
 
     def test_기초_유사분야_허용분야_없으면_불가(self, app):
         # '파이썬' 유사 그룹 = 코딩·프로그래밍. 기초 cert 허용 분야와 교집합 없음
-        inst = _make_instructor(cert_level='기초', specialties=['AI기초'])
+        inst = _make_instructor(cert_level=1, specialties=['AI기초'])
         assert _is_cert_eligible_for_similar(inst, '파이썬') is False
 
     def test_중급_코딩교육_유사분야_가능(self, app):
-        inst = _make_instructor(cert_level='중급', specialties=['코딩교육'])
+        inst = _make_instructor(cert_level=2, specialties=['코딩교육'])
         assert _is_cert_eligible_for_similar(inst, '파이썬') is True
 
 
@@ -395,13 +395,13 @@ class TestCertLevelFilter:
         basic_inst = _make_instructor(
             name='기초강사', region='동부권',
             specialties=['파이썬', 'AI기초'],
-            cert_level='기초', avg_rating=5.0,
+            cert_level=1, avg_rating=5.0,
         )
         # 전문가 등급 강사
         expert_inst = _make_instructor(
             name='전문강사', region='동부권',
             specialties=['파이썬'],
-            cert_level='전문가', avg_rating=4.0,
+            cert_level=3, avg_rating=4.0,
         )
         # '파이썬'은 기초 등급 불가
         req = _make_request(org_east, specialty='파이썬')
@@ -416,7 +416,7 @@ class TestCertLevelFilter:
         mid_inst = _make_instructor(
             name='중급강사', region='동부권',
             specialties=['코딩교육'],
-            cert_level='중급',
+            cert_level=2,
         )
         req = _make_request(org_east, specialty='코딩교육')
 
@@ -470,7 +470,7 @@ class TestSimilarSpecialtyExpansion:
         # '챗GPT' 전문 강사는 없고, 같은 AI·디지털 그룹인 'AI기초' 강사만 있음
         _make_instructor(
             name='AI기초강사', region='동부권', specialties=['AI기초'],
-            cert_level='전문가',
+            cert_level=3,
         )
         req = _make_request(org_east, specialty='챗GPT')
 
@@ -482,7 +482,7 @@ class TestSimilarSpecialtyExpansion:
     def test_유사분야_전문분야점수_20점(self, app, org_east):
         _make_instructor(
             name='유사분야강사', region='동부권', specialties=['AI기초'],
-            cert_level='전문가', avg_rating=4.8,
+            cert_level=3, avg_rating=4.8,
         )
         req = _make_request(org_east, specialty='챗GPT')
 
@@ -506,7 +506,7 @@ class TestRelaxedMatching:
         for i in range(3):
             _make_instructor(
                 name=f'유사강사{i}', region='동부권', specialties=['머신러닝'],
-                cert_level='전문가',
+                cert_level=3,
             )
         req = _make_request(org_east, specialty='AI기초', preferred_times=['오전'])
 
@@ -525,7 +525,7 @@ class TestRelaxedMatching:
         # 유사 분야 강사 (머신러닝 = AI·디지털 그룹)
         _make_instructor(
             name='유사강사', region='동부권', specialties=['머신러닝'],
-            cert_level='전문가',
+            cert_level=3,
         )
         req = _make_request(org_east, specialty='AI기초', preferred_times=['오전'])
 
@@ -553,17 +553,17 @@ class TestBestEffortMatching:
         # → 전문분야 0점, 권역 0점, 시간 0점이 되도록
         _make_instructor(
             name='최선강사1', region='동부권', specialties=['영상편집'],
-            cert_level='전문가', avg_rating=4.9,
+            cert_level=3, avg_rating=4.9,
             available_times=['저녁'],  # 요청 시간(오전)과 불일치
         )
         _make_instructor(
             name='최선강사2', region='동부권', specialties=['SNS활용'],
-            cert_level='전문가', avg_rating=4.7,
+            cert_level=3, avg_rating=4.7,
             available_times=['저녁'],
         )
         _make_instructor(
             name='최선강사3', region='동부권', specialties=['유튜브제작'],
-            cert_level='전문가', avg_rating=4.5,
+            cert_level=3, avg_rating=4.5,
             available_times=['저녁'],
         )
 
@@ -573,7 +573,7 @@ class TestBestEffortMatching:
         for i in range(3):
             _make_instructor(
                 name=f'기초강사{i}', region='동부권',
-                specialties=['AI기초'], cert_level='기초',
+                specialties=['AI기초'], cert_level=1,
                 avg_rating=4.5 + i * 0.1,
                 available_times=['저녁'],
             )
@@ -592,7 +592,7 @@ class TestBestEffortMatching:
         # 전문가 강사가 없어서 cert 필터 전부 제외되는 케이스
         for i in range(5):
             _make_instructor(
-                name=f'기초강사{i}', cert_level='기초',
+                name=f'기초강사{i}', cert_level=1,
                 specialties=['스마트폰활용'],
                 avg_rating=4.5 + i * 0.05,
             )
@@ -605,7 +605,7 @@ class TestBestEffortMatching:
         assert len(result['matches']) <= 3
 
     def test_최선추천_강사_match_type(self, app, org_east):
-        _make_instructor(cert_level='기초', specialties=['스마트폰활용'], avg_rating=4.9)
+        _make_instructor(cert_level=1, specialties=['스마트폰활용'], avg_rating=4.9)
         req = _make_request(org_east, specialty='챗GPT')
 
         result = find_top_matches(req.id)
@@ -954,7 +954,7 @@ class TestOrgTypeBonus:
         db.session.add(org)
         db.session.commit()
 
-        inst = _make_instructor(name='전문가강사', cert_level='전문가')
+        inst = _make_instructor(name='전문가강사', cert_level=3)
         value, reason = _calc_org_type_bonus(inst, org)
         assert value == 10.0
         assert '기업' in reason
@@ -964,7 +964,7 @@ class TestOrgTypeBonus:
         db.session.add(org)
         db.session.commit()
 
-        inst = _make_instructor(name='중급강사', cert_level='중급')
+        inst = _make_instructor(name='중급강사', cert_level=2)
         value, _ = _calc_org_type_bonus(inst, org)
         assert value == 0.0
 
@@ -973,7 +973,7 @@ class TestOrgTypeBonus:
         inst = Instructor(
             name='시니어강사', region='동부권',
             travel_range=['동부권'], specialties=['AI기초'],
-            cert_level='전문가', available_days=['월'], available_times=['오전'],
+            cert_level=3, available_days=['월'], available_times=['오전'],
             max_classes_month=4, target_audience=['시니어'],
             total_classes=10, avg_rating=4.5,
             last_active=date(2026, 5, 1), is_active=True,
@@ -989,7 +989,7 @@ class TestOrgTypeBonus:
         inst = Instructor(
             name='청소년강사', region='동부권',
             travel_range=['동부권'], specialties=['AI기초'],
-            cert_level='전문가', available_days=['월'], available_times=['오전'],
+            cert_level=3, available_days=['월'], available_times=['오전'],
             max_classes_month=4, target_audience=['청소년'],
             total_classes=10, avg_rating=4.5,
             last_active=date(2026, 5, 1), is_active=True,
@@ -1129,7 +1129,7 @@ class TestRegularLecture:
     def test_is_regular_request(self, app, org_east):
         regular = EducationRequest(
             org_id=org_east.id, specialty_needed='AI기초',
-            preferred_times=['오전'], frequency='정기', status='대기중',
+            preferred_times=['오전'], frequency='정기', status='대기',
         )
         db.session.add(regular)
         db.session.commit()
@@ -1137,7 +1137,7 @@ class TestRegularLecture:
 
         one_time = EducationRequest(
             org_id=org_east.id, specialty_needed='AI기초',
-            preferred_times=['오전'], frequency='1회성', status='대기중',
+            preferred_times=['오전'], frequency='1회성', status='대기',
         )
         db.session.add(one_time)
         db.session.commit()
@@ -1151,7 +1151,7 @@ class TestRegularLecture:
         req = EducationRequest(
             org_id=org_east.id, specialty_needed='AI기초',
             preferred_dates=['2026-06-01'], preferred_times=['오전'],
-            frequency='정기', status='대기중',
+            frequency='정기', status='대기',
         )
         db.session.add(req)
         db.session.commit()
@@ -1168,7 +1168,7 @@ class TestRegularLecture:
         req = EducationRequest(
             org_id=org_east.id, specialty_needed='AI기초',
             preferred_dates=['2026-06-01'], preferred_times=['오전'],
-            frequency='정기', status='대기중',
+            frequency='정기', status='대기',
         )
         db.session.add(req)
         db.session.commit()
@@ -1205,7 +1205,7 @@ class TestRegularLecture:
         current = EducationRequest(
             org_id=org_east.id, specialty_needed='AI기초',
             preferred_dates=['2026-06-01'], preferred_times=['오전'],
-            frequency='정기', status='대기중',
+            frequency='정기', status='대기',
         )
         db.session.add(current)
         db.session.commit()
@@ -1296,7 +1296,7 @@ class TestNewInstructorExposure:
             region='남부권',
             travel_range=['남부권', '동부권'],   # 동부권 이동 가능 (10점)
             specialties=['머신러닝'],             # AI기초와 유사 (20점)
-            cert_level='전문가',
+            cert_level=3,
             available_days=['월'],
             available_times=['저녁'],            # 오전 요청과 불일치 (0점)
             max_classes_month=4,
@@ -1466,7 +1466,7 @@ class TestIntegratedScenario:
         inst = Instructor(
             name='슈퍼강사', region='동부권',
             travel_range=['동부권'], specialties=['AI기초'],
-            cert_level='전문가',
+            cert_level=3,
             available_days=['월'], available_times=['오전'],
             max_classes_month=4, target_audience=['시니어'],
             total_classes=2,         # 신규 (+20)

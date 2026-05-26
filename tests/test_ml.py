@@ -62,7 +62,7 @@ def _make_org(name='복지관A', type='복지관', region='동부권'):
 
 
 def _make_instructor(
-    name='강사', region='동부권', specialties=None, cert_level='전문가',
+    name='강사', region='동부권', specialties=None, cert_level=3,
     avg_rating=4.5, total_classes=10, available_times=None,
 ):
     inst = Instructor(
@@ -84,7 +84,7 @@ def _make_request(org, specialty='AI기초', preferred_times=None):
         org_id=org.id, specialty_needed=specialty, target_audience='성인',
         expected_students=10, preferred_dates=['2026-06-01'],
         preferred_times=preferred_times or ['오전'],
-        frequency='주 1회', location_type='대면', status='대기중',
+        frequency='주 1회', location_type='대면', status='대기',
     )
     db.session.add(req)
     db.session.commit()
@@ -227,7 +227,7 @@ class TestMatchSelect:
         # Match 테이블에도 상태 반영
         m1 = Match.query.filter_by(request_id=req.id, instructor_id=i1.id).first()
         m2 = Match.query.filter_by(request_id=req.id, instructor_id=i2.id).first()
-        assert m1.status == '확정'
+        assert m1.status == '최종확정'
         assert m2.status == '거절'
 
     def test_select_파라미터_누락_400(self, client, app):
@@ -259,10 +259,10 @@ class TestMatchFeedback:
         assert log.was_conducted is True
         assert log.is_labeled is True
 
-        # Match 테이블에도 만족도 + status='완료'
+        # Match 테이블에도 만족도 + status='최종확정'
         m = Match.query.filter_by(request_id=req.id, instructor_id=inst.id).first()
         assert m.satisfaction_score == 4.5
-        assert m.status == '완료'
+        assert m.status == '최종확정'
 
     def test_feedback_범위_초과_400(self, client, app):
         res = client.post('/api/match/feedback', json={
@@ -328,7 +328,7 @@ class TestMLEndpoints:
         # 평점 0(결측), 활동일 미설정 강사 1명 (region 은 NOT NULL 이라 빈 문자열로)
         db.session.add(Instructor(
             name='결측강사', region='', travel_range=[],
-            specialties=['AI기초'], cert_level='기초',
+            specialties=['AI기초'], cert_level=1,
             available_days=['월'], available_times=['오전'],
             max_classes_month=4, target_audience=['성인'],
             total_classes=0, avg_rating=0.0, last_active=None,

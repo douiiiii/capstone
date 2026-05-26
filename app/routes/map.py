@@ -32,7 +32,9 @@ REGION_COORDINATES = {
 }
 
 # 매칭 완료로 간주할 Match.status 값 (정책 변경 시 이 값만 수정)
-MATCHED_MATCH_STATUSES = ('확정', '완료')
+# DB CHECK 제약: matches.status ∈ {'매칭제안','수락','거절','최종확정'}
+# 기존 '확정'/'완료' 를 '최종확정' 으로 통일.
+MATCHED_MATCH_STATUSES = ('최종확정',)
 
 
 def _empty_region_counter():
@@ -167,7 +169,7 @@ def get_map_instructors():
             "region": "동부권", "lat": 37.20, "lng": 127.07,
             "specialties": ["AI기초", "머신러닝"],
             "avg_rating": 4.8,
-            "cert_level": "전문가"
+            "cert_level": 3        // 1=기초, 2=중급, 3=전문가
           },
           ...
         ]
