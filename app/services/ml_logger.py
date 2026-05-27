@@ -111,3 +111,88 @@ def record_feedback(
     log.final_satisfaction = satisfaction
     db.session.commit()
     return log
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 검증 이슈 #6 수정: Match status 변경 시 ml_training_logs 자동 동기화
+# ─────────────────────────────────────────────────────────────────────
+
+# Match status → ml_logs 라벨 매핑 정책
+#   '수락'      → was_selected=True
+#   '최종확정'  → was_selected=True + was_conducted=True
+#   '거절'      → was_selected=False + not_selected_reason 기록
+#   '매칭제안'  → 변경 없음
+MATCH_STATUS_TO_LABEL = {
+    '수락':     {'was_selected': True,  'was_conducted': False},
+    '최종확정': {'was_selected': True,  'was_conducted': True},
+    '거절':     {'was_selected': False, 'was_conducted': False},
+}
+
+
+def sync_label_for_match(match, not_selected_reason: str | None = None) -> MLTrainingLog | None:
+    """
+    단일 매칭의 status 를 기반으로 해당 ml_training_logs 행을 자동 동기화.
+    상태 전이 API(accept/reject/expire/select/feedback) 직후 호출하면 됨.
+    """
+    log = MLTrainingLog.query.filter_by(
+        request_id=match.request_id, instructor_id=match.instructor_id,
+    ).first()
+    if not log:
+        return None
+
+    rule = MATCH_STATUS_TO_LABEL.get(match.status)
+    if rule is None:
+        return log  # '매칭제안' 등은 변경 없음
+
+    log.was_selected = rule['was_selected']
+    log.was_conducted = rule['was_conducted']
+    if match.satisfaction_score is not None and log.final_satisfaction is None:
+        log.final_satisfaction = match.satisfaction_score
+    if not rule['was_selected'] and not_selected_reason and not log.not_selected_reason:
+        log.not_selected_reason = not_selected_reason
+    db.session.commit()
+    return log
+
+
+def backfill_labels_from_matches() -> dict:
+    """
+    기존 matches 테이블의 status 를 기반으로 ml_training_logs 일괄 백필.
+    부분 라벨링된 기존 데이터를 한 번에 동기화할 때 사용.
+
+    반환: {'updated': N, 'skipped_no_log': M}
+    """
+    # 순환 import 회피: 지연 import
+    from app.models.match import Match
+
+    updated = 0
+    skipped = 0
+    for m in Match.query.all():
+        rule = MATCH_STATUS_TO_LABEL.get(m.status)
+        if rule is None:
+            continue
+        log = MLTrainingLog.query.filter_by(
+            request_id=m.request_id, instructor_id=m.instructor_id,
+        ).first()
+        if not log:
+            skipped += 1
+            continue
+        # 이미 라벨이 더 명확히 설정된 경우는 덮어쓰지 않음
+        changed = False
+        if log.was_selected != rule['was_selected']:
+            log.was_selected = rule['was_selected']
+            changed = True
+        if log.was_conducted != rule['was_conducted'] and rule['was_conducted']:
+            log.was_conducted = True
+            changed = True
+        if m.satisfaction_score is not None and log.final_satisfaction is None:
+            log.final_satisfaction = m.satisfaction_score
+            changed = True
+        if (not rule['was_selected']
+                and not log.not_selected_reason
+                and m.status == '거절'):
+            log.not_selected_reason = '수요처 거절(백필)'
+            changed = True
+        if changed:
+            updated += 1
+    db.session.commit()
+    return {'updated': updated, 'skipped_no_log': skipped}

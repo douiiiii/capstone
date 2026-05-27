@@ -1,11 +1,13 @@
 from flask import Blueprint, jsonify, request
 
 from app.models.education_request import EducationRequest
+from app.routes._errors import handle_api_errors
 
 requests_bp = Blueprint('requests', __name__)
 
 
 @requests_bp.route('/requests', methods=['GET'])
+@handle_api_errors  # 검증 이슈 #5 수정
 def get_requests():
     """
     전체 교육 요청 목록 조회

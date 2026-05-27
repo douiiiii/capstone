@@ -18,7 +18,7 @@ from app.models.education_request import EducationRequest
 from app.models.instructor import Instructor
 from app.models.match import Match
 from app.models.organization import Organization
-from app.services.region_service import are_adjacent
+from app.services.region_service import are_adjacent, normalize_region
 
 # ─────────────────────────────────────────────────────────
 # 전문 분야 유사도 그룹 (같은 그룹 = 유사 분야로 인정)
@@ -71,6 +71,17 @@ MAX_CLASSES_MONTH_MAX = 40
 # - 후보가 부족할 때만 fallback 으로 노출되도록 보호
 # ─────────────────────────────────────────────────────────
 REGION_GUARD_PENALTY = -20.0
+
+# ─────────────────────────────────────────────────────────
+# 요일 검증 (검증 이슈 #1 수정)
+# preferred_dates 에서 요일을 추출 후 강사의 available_days 와 비교.
+# 정책: 평일/주말 카테고리 OR 구체 요일 둘 다 지원.
+#   - '평일' / '주말' 카테고리 매칭
+#   - '월','화'... 구체 요일 매칭
+# 검증 실패 시 매칭 후보에서 완전 제외 (강의 진행 자체가 불가능하므로)
+# ─────────────────────────────────────────────────────────
+WEEKDAY_KO = ['월', '화', '수', '목', '금', '토', '일']
+WEEKDAY_LABELS = {True: '주말', False: '평일'}
 
 
 # ───────────────────────────── 보조 유틸 ──────────────────────────────
@@ -135,16 +146,92 @@ def _is_cert_eligible_for_similar(instructor: Instructor, specialty: str) -> boo
     return bool(allowed & group_specs & inst_specs)
 
 
+# ─────────────────────── 요일 추출/검증 (이슈 #1) ─────────────────────
+
+def _extract_requested_weekdays(preferred_dates) -> list[str]:
+    """
+    preferred_dates 에서 한국어 요일 리스트를 추출한다.
+
+    지원 입력 형식:
+      - ['2026-06-01', '2026-06-08']  (list of ISO date)
+      - '2026-06-01 ~ 2026-06-30'     (str, 범위 → 양 끝점만 사용)
+      - '2026-06-01'                    (str, 단일)
+
+    파싱 실패 시 빈 리스트를 반환. 빈 리스트면 요일 검증을 건너뛴다.
+    """
+    if not preferred_dates:
+        return []
+    raw = preferred_dates if isinstance(preferred_dates, list) else [preferred_dates]
+    weekdays: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        # 'YYYY-MM-DD ~ YYYY-MM-DD' 범위는 시작/종료 둘 다 사용
+        candidates = [s.strip() for s in item.split('~')] if '~' in item else [item.strip()]
+        for s in candidates:
+            try:
+                d = date.fromisoformat(s)
+            except Exception:
+                continue
+            weekdays.append(WEEKDAY_KO[d.weekday()])
+    return weekdays
+
+
+def _is_weekday_compatible(
+    instructor: Instructor, requested_weekdays: list[str],
+) -> tuple[bool, str]:
+    """
+    강사 available_days 와 요청된 요일이 호환되는지 검사.
+
+    available_days 가 '평일'/'주말' 카테고리, 구체 요일('월','화'...), 둘 다 섞여 있을 수 있어
+    두 표기를 모두 지원한다.
+
+    반환: (호환여부, 사유)
+      - 요청 요일이 비어있으면 (True, '요일 정보 없음 — 검증 생략')
+      - 강사 가능 요일이 비어있으면 (True, '강사 가능 요일 정보 없음 — 검증 생략')
+      - 요청된 요일 중 하나라도 강사가 가능하면 True
+    """
+    if not requested_weekdays:
+        return True, '요일 정보 없음 — 검증 생략'
+    avail = list(instructor.available_days or [])
+    if not avail:
+        return True, '강사 가능 요일 정보 없음 — 검증 생략'
+
+    # 카테고리(평일/주말) → 해당하는 구체 요일로 확장
+    expanded: set[str] = set()
+    for d in avail:
+        if d == '평일':
+            expanded.update(['월', '화', '수', '목', '금'])
+        elif d == '주말':
+            expanded.update(['토', '일'])
+        else:
+            expanded.add(d)
+
+    # 요청된 요일 중 하나라도 강사가 가능하면 OK
+    matched = [w for w in requested_weekdays if w in expanded]
+    if matched:
+        return True, f'요일 {matched} 가능'
+    needs = sorted(set(requested_weekdays))
+    return False, f'요청 요일 {needs} 불가 (강사 가능: {avail})'
+
+
 # ─────────────────────── 기본 점수 계산 함수 ──────────────────────────
 
 def _calc_region_score(instructor: Instructor, request_region: str | None) -> float:
-    """권역 점수 (최대 40점)"""
+    """권역 점수 (최대 40점)
+
+    검증 이슈 #3 수정: 외부에서 '동탄1' 같은 세부 지역명이 들어와도
+    normalize_region 으로 권역명을 정규화한 뒤 비교한다.
+    """
     if not request_region:
         return 0.0
-    travel_range = instructor.travel_range or []
-    if instructor.region == request_region:
+    # 요청 권역명 정규화 (예: '동탄1' → '동부권')
+    request_region = normalize_region(request_region)
+    inst_region = normalize_region(instructor.region)
+    travel_range = [normalize_region(r) for r in (instructor.travel_range or [])]
+    if inst_region == request_region:
         return 40.0
-    if are_adjacent(instructor.region, request_region):
+    if are_adjacent(inst_region, request_region):
         return 20.0
     if request_region in travel_range:
         return 10.0
@@ -656,6 +743,16 @@ def calculate_match_score(
             '사유': f'요청 권역({request_region}) 부적합 → {REGION_GUARD_PENALTY:.0f}점 가드',
         })
 
+    # 검증 이슈 #1 수정: 요일 검증 결과를 breakdown 에 기록 (점수에는 영향 없음 — 자동 제외 처리)
+    requested_weekdays = _extract_requested_weekdays(request.preferred_dates)
+    weekday_ok, weekday_reason = _is_weekday_compatible(instructor, requested_weekdays)
+    weekday_info = {
+        '요청_요일': requested_weekdays,
+        '강사_가능요일': list(instructor.available_days or []),
+        '검증결과': '호환' if weekday_ok else '불일치',
+        '사유': weekday_reason,
+    }
+
     def _add(name: str, value: float, reason: str):
         """양수면 bonuses, 음수면 penalties 로 정리. 0/빈사유는 무시."""
         if value > 0:
@@ -767,6 +864,8 @@ def calculate_match_score(
             '패널티_합계': penalty_sum,
             '최종_총점': total_score,
             '점수_공식': formula,
+            # 검증 이슈 #1 수정: 요일 검증 결과 노출
+            '요일_검증': weekday_info,
         },
     }
 
@@ -806,6 +905,22 @@ def _is_excluded_by_schedule(
     if not _is_regular_request(request):
         return False
     return _has_date_conflict(instructor, request)
+
+
+# 검증 이슈 #1 수정: 요일 불일치 강사 자동 제외
+def _is_excluded_by_weekday(
+    instructor: Instructor, request: EducationRequest,
+) -> tuple[bool, str]:
+    """
+    요청 요일과 강사 가능 요일이 호환되지 않으면 매칭 후보에서 완전 제외.
+
+    반환: (제외여부, 사유)
+    """
+    weekdays = _extract_requested_weekdays(request.preferred_dates)
+    ok, reason = _is_weekday_compatible(instructor, weekdays)
+    if ok:
+        return False, ''
+    return True, reason
 
 
 # ─────────────── v4-D: 매칭 실패 원인 분석 ─────────────────────────────
@@ -1033,7 +1148,7 @@ def find_top_matches(request_id: int, top_n: int = 5) -> dict | None:
     # ── 스코어링 컨텍스트 빌드 (이번 달 매칭 통계) ─────────────────
     context = _build_scoring_context(all_active)
 
-    # ── 자동 제외 (C-1 월최대 초과, D-3 일정 충돌) ────────────────
+    # ── 자동 제외 (C-1 월최대 초과, D-3 일정 충돌, 검증 #1 요일 불일치) ──
     auto_excluded: list[dict] = []
     candidate_pool: list[Instructor] = []
     for inst in all_active:
@@ -1053,6 +1168,15 @@ def find_top_matches(request_id: int, top_n: int = 5) -> dict | None:
                 'instructor_id': inst.id,
                 'instructor_name': inst.name,
                 '사유': '정기 강의 일정 충돌 (자동 제외)',
+            })
+            continue
+        # 검증 이슈 #1 수정: 요일 불일치 자동 제외 (강의 진행 자체 불가)
+        excl, reason = _is_excluded_by_weekday(inst, request)
+        if excl:
+            auto_excluded.append({
+                'instructor_id': inst.id,
+                'instructor_name': inst.name,
+                '사유': f'요일 불일치 (자동 제외) — {reason}',
             })
             continue
         candidate_pool.append(inst)

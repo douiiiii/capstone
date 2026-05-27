@@ -14,6 +14,7 @@ from flask import Blueprint, jsonify
 
 from app.models.education_request import EducationRequest
 from app.models.instructor import Instructor
+from app.routes._errors import handle_api_errors
 from app.models.match import Match
 
 map_bp = Blueprint('map', __name__)
@@ -43,6 +44,7 @@ def _empty_region_counter():
 
 
 @map_bp.route('/map/regions', methods=['GET'])
+@handle_api_errors  # 검증 이슈 #5 수정
 def get_map_regions():
     """
     권역별 중심 좌표 + 강사 수 / 교육 요청 수 / 매칭 완료 수
@@ -108,6 +110,7 @@ def get_map_regions():
 
 
 @map_bp.route('/map/heatmap', methods=['GET'])
+@handle_api_errors  # 검증 이슈 #5 수정
 def get_map_heatmap():
     """
     히트맵용 데이터 (lat, lng, intensity)
@@ -151,6 +154,7 @@ def get_map_heatmap():
 
 
 @map_bp.route('/map/instructors', methods=['GET'])
+@handle_api_errors  # 검증 이슈 #5 수정
 def get_map_instructors():
     """
     강사별 위치 데이터 (소속 권역의 중심 좌표 기준)

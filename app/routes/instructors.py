@@ -2,6 +2,12 @@ from flask import Blueprint, jsonify, request
 
 from app.extensions import db
 from app.models.instructor import Instructor
+from app.routes._errors import (
+    coerce_int,
+    error_response,
+    handle_api_errors,
+    require_fields,
+)
 from app.services.matching_service import (
     MAX_CLASSES_MONTH_MAX,
     MAX_CLASSES_MONTH_MIN,
@@ -11,6 +17,7 @@ instructors_bp = Blueprint('instructors', __name__)
 
 
 @instructors_bp.route('/instructors', methods=['GET'])
+@handle_api_errors  # 검증 이슈 #5 수정
 def get_instructors():
     """
     전체 강사 목록 조회
@@ -45,6 +52,7 @@ def get_instructors():
 @instructors_bp.route(
     '/instructors/<int:instructor_id>/max-classes', methods=['PATCH'],
 )
+@handle_api_errors  # 검증 이슈 #5 수정
 def update_max_classes(instructor_id: int):
     """
     강사의 월 최대 강의 횟수 수정 (v5.1 신규)
@@ -56,35 +64,25 @@ def update_max_classes(instructor_id: int):
     """
     inst = db.session.get(Instructor, instructor_id)
     if not inst:
-        return jsonify({
-            'success': False,
-            'message': f'강사 ID {instructor_id} 를 찾을 수 없습니다.',
-        }), 404
+        return error_response(
+            f'강사 ID {instructor_id} 를 찾을 수 없습니다.',
+            'NOT_FOUND', 404,
+        )
 
-    data = request.get_json() or {}
-    value = data.get('max_classes_month')
-    if value is None:
-        return jsonify({
-            'success': False,
-            'message': 'max_classes_month 가 필요합니다.',
-        }), 400
-
-    try:
-        value = int(value)
-    except (TypeError, ValueError):
-        return jsonify({
-            'success': False,
-            'message': 'max_classes_month 는 정수여야 합니다.',
-        }), 400
+    data = request.get_json(silent=True) or {}
+    err = require_fields(data, ['max_classes_month'])
+    if err:
+        return err
+    value, err = coerce_int(data['max_classes_month'], 'max_classes_month')
+    if err:
+        return err
 
     if not (MAX_CLASSES_MONTH_MIN <= value <= MAX_CLASSES_MONTH_MAX):
-        return jsonify({
-            'success': False,
-            'message': (
-                f'max_classes_month 는 {MAX_CLASSES_MONTH_MIN}~{MAX_CLASSES_MONTH_MAX}'
-                ' 범위여야 합니다.'
-            ),
-        }), 400
+        return error_response(
+            f'max_classes_month 는 {MAX_CLASSES_MONTH_MIN}~{MAX_CLASSES_MONTH_MAX}'
+            ' 범위여야 합니다.',
+            'OUT_OF_RANGE', 400,
+        )
 
     inst.max_classes_month = value
     db.session.commit()

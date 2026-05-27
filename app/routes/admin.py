@@ -18,6 +18,7 @@ from functools import wraps
 from flask import Blueprint, jsonify, request
 
 from app.models.grade_history import GradeHistory
+from app.routes._errors import handle_api_errors
 from app.models.instructor import Instructor
 from app.services.grade_service import (
     bulk_upgrade_all,
@@ -63,6 +64,7 @@ def require_admin_token(view_func):
 
 @admin_bp.route('/admin/instructors', methods=['GET'])
 @require_admin_token
+@handle_api_errors  # 검증 이슈 #5 수정
 def admin_list_instructors():
     """등급 정보 포함 전체 강사 목록 (활동/비활동 모두)"""
     instructors = Instructor.query.order_by(Instructor.id.asc()).all()
@@ -79,6 +81,7 @@ def admin_list_instructors():
 
 @admin_bp.route('/admin/growth', methods=['GET'])
 @require_admin_token
+@handle_api_errors  # 검증 이슈 #5 수정
 def admin_growth_candidates():
     """승급 80% 이상 / 100% 충족한 강사 목록"""
     data = list_growth_candidates()
@@ -95,6 +98,7 @@ def admin_growth_candidates():
 
 @admin_bp.route('/admin/grade-history', methods=['GET'])
 @require_admin_token
+@handle_api_errors  # 검증 이슈 #5 수정
 def admin_grade_history():
     """등급 변경 이력 (최신순)"""
     rows = GradeHistory.query.order_by(GradeHistory.changed_at.desc()).all()
@@ -111,6 +115,7 @@ def admin_grade_history():
 
 @admin_bp.route('/admin/grade-upgrade', methods=['POST'])
 @require_admin_token
+@handle_api_errors  # 검증 이슈 #5 수정
 def admin_bulk_upgrade():
     """
     승급 조건을 충족한 모든 활동 강사를 자동으로 한 단계 승급.

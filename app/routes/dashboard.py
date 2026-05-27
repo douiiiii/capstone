@@ -15,6 +15,7 @@ from flask import Blueprint, jsonify
 
 from app.models.education_request import EducationRequest
 from app.models.instructor import Instructor
+from app.routes._errors import handle_api_errors
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
@@ -27,6 +28,7 @@ MATCHED_STATUSES = ('매칭완료', '진행중', '완료')
 
 
 @dashboard_bp.route('/dashboard/summary', methods=['GET'])
+@handle_api_errors  # 검증 이슈 #5 수정
 def get_summary():
     """
     전체 요약 지표
@@ -74,6 +76,7 @@ def get_summary():
 
 
 @dashboard_bp.route('/dashboard/region', methods=['GET'])
+@handle_api_errors  # 검증 이슈 #5 수정
 def get_region_stats():
     """
     권역별 강사 수 / 교육 요청 수
@@ -125,6 +128,7 @@ def get_region_stats():
 
 
 @dashboard_bp.route('/dashboard/specialty', methods=['GET'])
+@handle_api_errors  # 검증 이슈 #5 수정
 def get_specialty_stats():
     """
     전문분야별 강사 수 / 인기 전문분야 Top5
@@ -190,6 +194,7 @@ FAILURE_TOP_N = 5
 
 
 @dashboard_bp.route('/dashboard/failure-stats', methods=['GET'])
+@handle_api_errors  # 검증 이슈 #5 수정
 def get_failure_stats():
     """
     매칭 실패 패턴 통계

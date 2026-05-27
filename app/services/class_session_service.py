@@ -8,8 +8,12 @@
   2. 강사별 월 세션 카운트 (부하 분산 계산 용)
   3. 강사별 시간대 충돌 검사 (날짜 + 시간 일치)
   4. 강사 누적 강의 횟수(total_classes) 재계산
+
+검증 이슈 #7 수정: 시간 정밀도 (HH:MM) 지원
+  - 새 세션은 session_start_time / session_end_time 도 함께 저장
+  - 충돌 검사 시 두 값이 있으면 시·분 단위로 정밀 비교, 없으면 카테고리 fallback
 """
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 import re
 
 from app.extensions import db
@@ -30,6 +34,30 @@ ACTIVE_SESSION_STATUSES = ('예정', '완료')
 
 # 매칭 상태가 다음 집합에 속할 때만 세션을 생성/유지한다.
 CONFIRMED_MATCH_STATUSES = ('수락', '최종확정')
+
+
+# 검증 이슈 #7 수정: 카테고리 → 기본 시·분 범위
+# 외부에서 구체 시간을 받지 못한 경우 이 범위로 fallback.
+SESSION_TIME_RANGES: dict[str, tuple[time, time]] = {
+    '오전': (time(9, 0), time(12, 0)),
+    '오후': (time(13, 0), time(17, 0)),
+    '저녁': (time(18, 0), time(21, 0)),
+}
+
+
+def _category_to_time_range(category: str) -> tuple[time | None, time | None]:
+    """카테고리(오전/오후/저녁)에 대응하는 (start, end) 반환. 미지원 시 (None, None)."""
+    return SESSION_TIME_RANGES.get(category, (None, None))
+
+
+def _ranges_overlap(
+    a_start: time | None, a_end: time | None,
+    b_start: time | None, b_end: time | None,
+) -> bool:
+    """두 [start, end) 구간이 겹치는지. 어느 한쪽이라도 None 이면 False (정밀 비교 불가)."""
+    if not all((a_start, a_end, b_start, b_end)):
+        return False
+    return a_start < b_end and b_start < a_end
 
 
 # ────────────────── frequency 파싱 ─────────────────────────────────
@@ -170,11 +198,15 @@ def create_sessions_for_match(match: Match, commit: bool = True) -> list[ClassSe
     init_status = _initial_session_status(match.status)
     sessions: list[ClassSession] = []
     for sess_date, sess_time in schedule:
+        # 검증 이슈 #7 수정: 카테고리에서 기본 시·분 범위를 추출해 함께 저장
+        start_t, end_t = _category_to_time_range(sess_time)
         s = ClassSession(
             match_id=match.id,
             instructor_id=match.instructor_id,
             session_date=sess_date,
             session_time=sess_time,
+            session_start_time=start_t,
+            session_end_time=end_t,
             status=init_status,
         )
         db.session.add(s)
@@ -243,9 +275,11 @@ def has_schedule_conflict(
     exclude_match_id: int | None = None,
 ) -> bool:
     """
-    이미 잡혀있는 활성 세션과 (날짜, 시간대) 가 하나라도 겹치면 True.
-    candidate_dates : ISO 문자열 또는 date 의 리스트
-    candidate_times : '오전' / '오후' / '저녁' 등의 리스트
+    이미 잡혀있는 활성 세션과 (날짜, 시간) 가 하나라도 겹치면 True.
+
+    검증 이슈 #7 수정: 시·분 단위 정밀도 적용.
+      - 후보·기존 세션 모두 session_start_time/session_end_time 이 있으면 시간 범위로 비교
+      - 한쪽이라도 None 이면 카테고리(오전/오후/저녁) 기준으로 fallback
     """
     if not candidate_dates or not candidate_times:
         return False
@@ -256,16 +290,32 @@ def has_schedule_conflict(
         return False
 
     times = set(candidate_times)
+    # 후보 시간 카테고리를 시·분 범위로 풀어둔다 (precise 비교용)
+    candidate_ranges = [
+        _category_to_time_range(t) for t in times
+    ]
 
+    # 1차 좁히기: 같은 강사 + 같은 날짜만 조회 (카테고리 일치 여부는 Python 에서 판정)
     query = ClassSession.query.filter(
         ClassSession.instructor_id == instructor_id,
         ClassSession.status.in_(ACTIVE_SESSION_STATUSES),
         ClassSession.session_date.in_(parsed_dates),
-        ClassSession.session_time.in_(times),
     )
     if exclude_match_id is not None:
         query = query.filter(ClassSession.match_id != exclude_match_id)
-    return db.session.query(query.exists()).scalar()
+
+    for existing in query.all():
+        # 정밀 시간 비교 (양측 모두 시·분 정보가 있을 때만)
+        for cand_start, cand_end in candidate_ranges:
+            if _ranges_overlap(
+                existing.session_start_time, existing.session_end_time,
+                cand_start, cand_end,
+            ):
+                return True
+        # fallback: 카테고리 동일 비교 (정밀 비교 불가하거나 카테고리만 들어온 경우)
+        if existing.session_time in times:
+            return True
+    return False
 
 
 # ────────────────── total_classes 재계산 ──────────────────────────

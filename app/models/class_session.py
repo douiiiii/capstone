@@ -23,8 +23,13 @@ class ClassSession(db.Model):
     instructor_id = db.Column(db.Integer, db.ForeignKey('instructors.id'), nullable=False)
     # 개별 강의 날짜 (예: 2026-06-01)
     session_date = db.Column(db.Date, nullable=False)
-    # 시간대 (오전 / 오후 / 저녁)
+    # 시간대 (오전 / 오후 / 저녁) — 호환용 카테고리
     session_time = db.Column(db.String(10), nullable=False)
+    # 검증 이슈 #7 수정: 시·분 단위 정밀 시간 (TIME 타입, nullable — 기존 데이터 호환)
+    # 새 매칭부터는 세션 생성 시 자동으로 채워진다.
+    # 충돌 검사는 두 값이 모두 있으면 시간 단위, 아니면 카테고리 fallback.
+    session_start_time = db.Column(db.Time, nullable=True)
+    session_end_time = db.Column(db.Time, nullable=True)
     # 상태 (예정 / 완료 / 취소)
     status = db.Column(db.String(10), default='예정', nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -36,6 +41,14 @@ class ClassSession(db.Model):
             'instructor_id': self.instructor_id,
             'session_date': str(self.session_date) if self.session_date else None,
             'session_time': self.session_time,
+            'session_start_time': (
+                self.session_start_time.strftime('%H:%M')
+                if self.session_start_time else None
+            ),
+            'session_end_time': (
+                self.session_end_time.strftime('%H:%M')
+                if self.session_end_time else None
+            ),
             'status': self.status,
             'created_at': str(self.created_at) if self.created_at else None,
         }

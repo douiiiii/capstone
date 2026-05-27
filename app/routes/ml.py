@@ -11,6 +11,7 @@ from flask import Blueprint, jsonify
 from app.extensions import db
 from app.models.education_request import EducationRequest
 from app.models.instructor import Instructor
+from app.routes._errors import error_response, handle_api_errors
 from app.services.data_quality import build_ml_status, build_quality_report
 from app.services.feature_encoder import (
     build_feature_snapshot,
@@ -22,6 +23,7 @@ ml_bp = Blueprint('ml', __name__)
 
 
 @ml_bp.route('/ml/features/<int:request_id>', methods=['GET'])
+@handle_api_errors  # 검증 이슈 #5 수정
 def get_features(request_id: int):
     """
     특정 교육 요청에 대한 정규화된 피처.
@@ -36,10 +38,10 @@ def get_features(request_id: int):
     """
     request = db.session.get(EducationRequest, request_id)
     if not request:
-        return jsonify({
-            'success': False,
-            'message': f'요청 ID {request_id} 를 찾을 수 없습니다.',
-        }), 404
+        return error_response(
+            f'요청 ID {request_id} 를 찾을 수 없습니다.',
+            'NOT_FOUND', 404,
+        )
 
     instructors = Instructor.query.filter_by(is_active=True).all()
 
@@ -52,6 +54,7 @@ def get_features(request_id: int):
 
 
 @ml_bp.route('/ml/data-quality', methods=['GET'])
+@handle_api_errors  # 검증 이슈 #5 수정
 def get_data_quality():
     """결측값/이상값 현황 + 품질 점수"""
     return jsonify({
@@ -61,6 +64,7 @@ def get_data_quality():
 
 
 @ml_bp.route('/ml/status', methods=['GET'])
+@handle_api_errors  # 검증 이슈 #5 수정
 def get_ml_status():
     """학습 데이터 진척도 + 목표(500건) 달성 여부"""
     return jsonify({
