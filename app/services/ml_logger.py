@@ -6,7 +6,6 @@ ML 학습용 매칭 로그 기록 서비스 (v5.0 신규)
 """
 from app.extensions import db
 from app.models.education_request import EducationRequest
-from app.models.instructor import Instructor
 from app.models.ml_training_log import MLTrainingLog
 from app.services.feature_encoder import build_feature_snapshot
 

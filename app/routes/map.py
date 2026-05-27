@@ -11,11 +11,11 @@ Kakao Map / Google Map / Leaflet 등 어떤 지도 라이브러리든 쓸 수 �
   GET /api/map/instructors : 강사별 위치 (소속 권역 중심 좌표 기준)
 """
 from flask import Blueprint, jsonify
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.models.education_request import EducationRequest
 from app.models.instructor import Instructor
 from app.routes._errors import handle_api_errors
-from app.models.match import Match
 
 map_bp = Blueprint('map', __name__)
 
@@ -76,9 +76,18 @@ def get_map_regions():
             instructor_counts[inst.region] += 1
 
     # 교육 요청 수 (요청을 낸 기관의 region 기준)
+    # N+1 회피: organization joinedload + matches selectinload (1:N 관계)
     request_counts = _empty_region_counter()
     matched_counts = _empty_region_counter()
-    for req in EducationRequest.query.all():
+    requests_with_relations = (
+        EducationRequest.query
+        .options(
+            joinedload(EducationRequest.organization),
+            selectinload(EducationRequest.matches),
+        )
+        .all()
+    )
+    for req in requests_with_relations:
         org_region = req.organization.region if req.organization else None
         if org_region in request_counts:
             request_counts[org_region] += 1
@@ -130,7 +139,13 @@ def get_map_heatmap():
       }
     """
     intensity_by_region = _empty_region_counter()
-    for req in EducationRequest.query.all():
+    # N+1 회피: organization eager load
+    requests = (
+        EducationRequest.query
+        .options(joinedload(EducationRequest.organization))
+        .all()
+    )
+    for req in requests:
         org_region = req.organization.region if req.organization else None
         if org_region in intensity_by_region:
             intensity_by_region[org_region] += 1

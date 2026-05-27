@@ -14,7 +14,6 @@ from app.services.class_session_service import (
     mark_match_sessions_completed,
     recalculate_total_classes,
 )
-from app.services.matching_engine import run_matching
 from app.services.matching_service import find_top_matches
 from app.services.ml_logger import (
     mark_selection,

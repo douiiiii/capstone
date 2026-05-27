@@ -22,7 +22,6 @@ from app.routes._errors import handle_api_errors
 from app.models.instructor import Instructor
 from app.services.grade_service import (
     bulk_upgrade_all,
-    check_eligibility,
     list_growth_candidates,
 )
 

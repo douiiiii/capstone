@@ -29,7 +29,7 @@ def create_app(config_name='default'):
 
     with app.app_context():
         # 모든 모델 import (테이블 생성을 위해 필요)
-        from . import models  # noqa: F401
+        from . import models  # noqa: F401  # 테이블 등록 트리거
         db.create_all()
 
         # 테스트 환경에서는 시드 데이터 삽입 생략 (테스트 픽스처가 직접 관리)

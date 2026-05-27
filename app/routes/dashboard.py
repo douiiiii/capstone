@@ -12,6 +12,7 @@
 from collections import Counter
 
 from flask import Blueprint, jsonify
+from sqlalchemy.orm import joinedload
 
 from app.models.education_request import EducationRequest
 from app.models.instructor import Instructor
@@ -102,7 +103,12 @@ def get_region_stats():
     )
 
     # 권역별 교육 요청 수 (organization.region 기준)
-    request_rows = EducationRequest.query.all()
+    # N+1 회피: organization 을 eager load
+    request_rows = (
+        EducationRequest.query
+        .options(joinedload(EducationRequest.organization))
+        .all()
+    )
     request_counts = Counter(
         ((r.organization.region if r.organization else None) or '미지정')
         for r in request_rows
@@ -166,7 +172,7 @@ def get_specialty_stats():
         for spec, cnt in specialty_counter.most_common()
     ]
 
-    # 교육 요청에서 인기 전문분야 Top N
+    # 교육 요청에서 인기 전문분야 Top N (specialty_needed 컬럼만 사용 — eager load 불필요)
     request_rows = EducationRequest.query.all()
     request_counter = Counter(
         r.specialty_needed for r in request_rows if r.specialty_needed
@@ -219,9 +225,11 @@ def get_failure_stats():
         }
       }
     """
-    # failure_reasons 가 있는 요청만 조회
+    # failure_reasons 가 있는 요청만 조회 (organization 같이 eager load → N+1 회피)
     failed_requests = [
-        r for r in EducationRequest.query.all()
+        r for r in EducationRequest.query
+            .options(joinedload(EducationRequest.organization))
+            .all()
         if r.failure_reasons
     ]
 

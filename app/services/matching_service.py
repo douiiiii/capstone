@@ -13,11 +13,12 @@ v3.0 대비 추가 사항:
 """
 from datetime import datetime, date
 
+from sqlalchemy.orm import joinedload
+
 from app.extensions import db
 from app.models.education_request import EducationRequest
 from app.models.instructor import Instructor
 from app.models.match import Match
-from app.models.organization import Organization
 from app.services.region_service import are_adjacent, normalize_region
 
 # ─────────────────────────────────────────────────────────
@@ -305,7 +306,9 @@ def _calc_activity_penalty(instructor: Instructor) -> tuple[float, str]:
 
 # ──────────────── A항: 피드백 반영 시스템 ─────────────────────────────
 
-def _calc_satisfaction_bonus(instructor: Instructor) -> tuple[float, str]:
+def _calc_satisfaction_bonus(
+    instructor: Instructor, context: dict | None = None,
+) -> tuple[float, str]:
     """
     수요처 만족도 평가 점수 반영 (A-1)
     - 평균 만족도 4.5 이상 : +10점
@@ -313,10 +316,14 @@ def _calc_satisfaction_bonus(instructor: Instructor) -> tuple[float, str]:
     - 그 외 / 이력 없음    : 0점
     반환값은 (점수, 사유) — 점수는 부호 그대로 (양수=보너스, 음수=패널티)
     """
-    scores = [
-        m.satisfaction_score for m in (instructor.matches or [])
-        if m.satisfaction_score is not None
-    ]
+    # N+1 회피: 사전 캐싱된 만족도 점수 사용
+    if context and 'satisfaction_by_inst' in context:
+        scores = context['satisfaction_by_inst'].get(instructor.id, [])
+    else:
+        scores = [
+            m.satisfaction_score for m in (instructor.matches or [])
+            if m.satisfaction_score is not None
+        ]
     if not scores:
         return 0.0, '만족도 평가 이력 없음'
     avg = sum(scores) / len(scores)
@@ -329,6 +336,7 @@ def _calc_satisfaction_bonus(instructor: Instructor) -> tuple[float, str]:
 
 def _calc_rerequest_bonus(
     instructor: Instructor, request: EducationRequest,
+    context: dict | None = None,
 ) -> tuple[float, str]:
     """
     같은 강사 재요청 횟수 점수화 (A-2)
@@ -337,16 +345,23 @@ def _calc_rerequest_bonus(
     """
     if not request.org_id:
         return 0.0, ''
-    count = (
-        Match.query
-        .join(EducationRequest, Match.request_id == EducationRequest.id)
-        .filter(
-            Match.instructor_id == instructor.id,
-            EducationRequest.org_id == request.org_id,
-            EducationRequest.id != request.id,
+    # N+1 회피: 사전 캐싱된 (강사→기관→요청id) 인덱스 사용
+    if context and 'rerequest_data' in context:
+        req_ids = (
+            context['rerequest_data'].get(instructor.id, {}).get(request.org_id, [])
         )
-        .count()
-    )
+        count = sum(1 for rid in req_ids if rid != request.id)
+    else:
+        count = (
+            Match.query
+            .join(EducationRequest, Match.request_id == EducationRequest.id)
+            .filter(
+                Match.instructor_id == instructor.id,
+                EducationRequest.org_id == request.org_id,
+                EducationRequest.id != request.id,
+            )
+            .count()
+        )
     if count >= 3:
         return 15.0, f'같은 기관 재요청 {count}회 (3회 이상 → +15점)'
     if count >= 1:
@@ -354,15 +369,21 @@ def _calc_rerequest_bonus(
     return 0.0, ''
 
 
-def _calc_bad_rating_penalty(instructor: Instructor) -> tuple[float, str]:
+def _calc_bad_rating_penalty(
+    instructor: Instructor, context: dict | None = None,
+) -> tuple[float, str]:
     """
     누적 나쁜 평가 패널티 (A-3)
     - 3.0 미만 평가가 3회 이상 누적된 강사: 자동 후순위 (-30점)
     """
-    bad_count = sum(
-        1 for m in (instructor.matches or [])
-        if m.satisfaction_score is not None and m.satisfaction_score < 3.0
-    )
+    # N+1 회피: 사전 카운팅된 나쁜 평가 수 사용
+    if context and 'bad_rating_counts' in context:
+        bad_count = context['bad_rating_counts'].get(instructor.id, 0)
+    else:
+        bad_count = sum(
+            1 for m in (instructor.matches or [])
+            if m.satisfaction_score is not None and m.satisfaction_score < 3.0
+        )
     if bad_count >= 3:
         return -30.0, f'나쁜 평가 {bad_count}회 누적 (자동 후순위 -30점)'
     return 0.0, ''
@@ -407,6 +428,7 @@ def _calc_org_type_bonus(
 
 def _calc_prior_match_bonus(
     instructor: Instructor, request: EducationRequest,
+    context: dict | None = None,
 ) -> tuple[float, str]:
     """
     수요처 과거 매칭 이력 기반 보너스 (B-2)
@@ -414,16 +436,23 @@ def _calc_prior_match_bonus(
     """
     if not request.org_id:
         return 0.0, ''
-    exists = (
-        Match.query
-        .join(EducationRequest, Match.request_id == EducationRequest.id)
-        .filter(
-            Match.instructor_id == instructor.id,
-            EducationRequest.org_id == request.org_id,
-            EducationRequest.id != request.id,
+    # N+1 회피: 사전 캐싱된 (강사→기관→요청id) 인덱스 사용
+    if context and 'rerequest_data' in context:
+        req_ids = (
+            context['rerequest_data'].get(instructor.id, {}).get(request.org_id, [])
         )
-        .first()
-    )
+        exists = any(rid != request.id for rid in req_ids)
+    else:
+        exists = (
+            Match.query
+            .join(EducationRequest, Match.request_id == EducationRequest.id)
+            .filter(
+                Match.instructor_id == instructor.id,
+                EducationRequest.org_id == request.org_id,
+                EducationRequest.id != request.id,
+            )
+            .first()
+        )
     if exists:
         return 5.0, '이전 매칭 이력 있음 → +5점'
     return 0.0, ''
@@ -554,7 +583,7 @@ def _normalize_org_type(org_type: str | None) -> str | None:
 
 
 def _calc_org_chemistry_bonus(
-    instructor: Instructor, organization,
+    instructor: Instructor, organization, context: dict | None = None,
 ) -> tuple[float, str]:
     """
     강사-기관유형 상성 보너스 (v4-A-1)
@@ -567,17 +596,23 @@ def _calc_org_chemistry_bonus(
     if not target_type:
         return 0.0, ''
 
-    # 강사가 해당 유형 기관에서 진행한 매칭의 satisfaction_score 평균
-    scores: list[float] = []
-    for m in (instructor.matches or []):
-        if m.satisfaction_score is None:
-            continue
-        req = m.request
-        org = req.organization if req else None
-        if not org:
-            continue
-        if _normalize_org_type(org.type) == target_type:
-            scores.append(m.satisfaction_score)
+    # N+1 회피: 사전 그룹화된 (강사→기관유형→만족도 점수 목록) 인덱스 사용
+    if context and 'chemistry_by_type' in context:
+        scores = (
+            context['chemistry_by_type'].get(instructor.id, {}).get(target_type, [])
+        )
+    else:
+        # fallback: 강사 매칭을 순회하며 직접 집계
+        scores: list[float] = []
+        for m in (instructor.matches or []):
+            if m.satisfaction_score is None:
+                continue
+            req = m.request
+            org = req.organization if req else None
+            if not org:
+                continue
+            if _normalize_org_type(org.type) == target_type:
+                scores.append(m.satisfaction_score)
 
     if not scores:
         return 0.0, f'{target_type} 평가 이력 없음 (상성 보너스 없음)'
@@ -685,24 +720,89 @@ def _calc_growth_bonus(instructor: Instructor) -> tuple[float, str]:
 
 def _build_scoring_context(active_instructors: list[Instructor]) -> dict:
     """
-    매칭 시 반복 조회되는 데이터를 미리 캐싱.
-    - month_match_counts : 강사별 이번 달 확정 매칭 수
-    - most_matched_ids   : 이번 달 매칭이 가장 많은 강사 ID 집합
+    매칭 시 반복 조회되는 데이터를 미리 캐싱 (N+1 쿼리 회피).
+
+    캐시 항목:
+      - month_match_counts  : 강사별 이번 달 활성 세션 수
+      - most_matched_ids    : 이번 달 매칭이 가장 많은 강사 ID 집합
+      - satisfaction_by_inst: 강사별 만족도 점수 리스트 (만족도/나쁜평가 패널티 공유)
+      - bad_rating_counts   : 강사별 <3.0 평가 누적 횟수
+      - rerequest_data      : 강사별 {기관 id → [요청 id 목록]} (재요청·과거매칭 보너스 공유)
+      - chemistry_by_type   : 강사별 {기관 유형 → 만족도 점수 리스트} (상성 보너스)
     """
     today = date.today()
-    counts: dict[int, int] = {}
-    for inst in active_instructors:
-        counts[inst.id] = _count_this_month_confirmed(inst, today)
+    instructor_ids = [i.id for i in active_instructors]
+
+    # ── 배치 1: 이번 달 활성 세션 수 (N개 쿼리 → 1개 쿼리) ─────────
+    from app.models.class_session import ClassSession
+    from app.services.class_session_service import ACTIVE_SESSION_STATUSES
+    counts: dict[int, int] = {iid: 0 for iid in instructor_ids}
+    if instructor_ids:
+        session_rows = (
+            ClassSession.query
+            .filter(
+                ClassSession.instructor_id.in_(instructor_ids),
+                ClassSession.status.in_(ACTIVE_SESSION_STATUSES),
+                db.extract('year', ClassSession.session_date) == today.year,
+                db.extract('month', ClassSession.session_date) == today.month,
+            )
+            .all()
+        )
+        for s in session_rows:
+            counts[s.instructor_id] = counts.get(s.instructor_id, 0) + 1
 
     max_count = max(counts.values()) if counts else 0
     most_matched_ids = (
         {iid for iid, c in counts.items() if c == max_count}
         if max_count > 0 else set()
     )
+
+    # ── 배치 2: 강사별 매칭 통계 (N개 쿼리 → 1개 쿼리, eager loading) ──
+    satisfaction_by_inst: dict[int, list[float]] = {iid: [] for iid in instructor_ids}
+    bad_rating_counts: dict[int, int] = {iid: 0 for iid in instructor_ids}
+    # iid → { org_id: [req_id, ...] }  — 재요청/과거 매칭 보너스 공유
+    rerequest_data: dict[int, dict[int, list[int]]] = {iid: {} for iid in instructor_ids}
+    # iid → { 기관유형: [만족도 점수, ...] }  — 상성 보너스
+    chemistry_by_type: dict[int, dict[str, list[float]]] = {iid: {} for iid in instructor_ids}
+
+    if instructor_ids:
+        all_matches = (
+            Match.query
+            .options(
+                joinedload(Match.request).joinedload(EducationRequest.organization)
+            )
+            .filter(Match.instructor_id.in_(instructor_ids))
+            .all()
+        )
+        for m in all_matches:
+            iid = m.instructor_id
+            req = m.request
+            org = req.organization if req else None
+
+            # 재요청 / 과거 매칭 이력 누적
+            if req and req.org_id:
+                rerequest_data[iid].setdefault(req.org_id, []).append(req.id)
+
+            # 만족도 통계 (만족도 누적 + 나쁜 평가 + 상성)
+            if m.satisfaction_score is not None:
+                satisfaction_by_inst[iid].append(m.satisfaction_score)
+                if m.satisfaction_score < 3.0:
+                    bad_rating_counts[iid] += 1
+                if org:
+                    org_type = _normalize_org_type(org.type)
+                    if org_type:
+                        chemistry_by_type[iid].setdefault(org_type, []).append(
+                            m.satisfaction_score,
+                        )
+
     return {
         'today': today,
         'month_match_counts': counts,
         'most_matched_ids': most_matched_ids,
+        'satisfaction_by_inst': satisfaction_by_inst,
+        'bad_rating_counts': bad_rating_counts,
+        'rerequest_data': rerequest_data,
+        'chemistry_by_type': chemistry_by_type,
     }
 
 
@@ -774,15 +874,15 @@ def calculate_match_score(
         })
 
     # A-1 만족도
-    sat_value, sat_reason = _calc_satisfaction_bonus(instructor)
+    sat_value, sat_reason = _calc_satisfaction_bonus(instructor, context)
     _add('만족도 보너스/패널티', sat_value, sat_reason)
 
     # A-2 재요청
-    rerequest_value, rerequest_reason = _calc_rerequest_bonus(instructor, request)
+    rerequest_value, rerequest_reason = _calc_rerequest_bonus(instructor, request, context)
     _add('재요청 보너스', rerequest_value, rerequest_reason)
 
     # A-3 나쁜 평가 누적
-    bad_value, bad_reason = _calc_bad_rating_penalty(instructor)
+    bad_value, bad_reason = _calc_bad_rating_penalty(instructor, context)
     _add('누적 나쁜평가 패널티', bad_value, bad_reason)
 
     # B-1 기관 유형 가중치
@@ -790,7 +890,7 @@ def calculate_match_score(
     _add('기관 유형 보너스', org_value, org_reason)
 
     # B-2 과거 매칭 이력
-    prior_value, prior_reason = _calc_prior_match_bonus(instructor, request)
+    prior_value, prior_reason = _calc_prior_match_bonus(instructor, request, context)
     _add('과거 매칭 이력 보너스', prior_value, prior_reason)
 
     # C-2 월 강의 80% 도달
@@ -810,7 +910,7 @@ def calculate_match_score(
     _add('신규 강사 보너스', new_value, new_reason)
 
     # v4-A-1 강사-기관유형 상성 보너스
-    chem_value, chem_reason = _calc_org_chemistry_bonus(instructor, organization)
+    chem_value, chem_reason = _calc_org_chemistry_bonus(instructor, organization, context)
     _add('상성 보너스', chem_value, chem_reason)
 
     # v4-A-2 선호/비선호 기관 유형
@@ -1025,6 +1125,7 @@ def _pick_newcomer_slot(
     request: EducationRequest,
     context: dict,
     excluded_ids: set[int],
+    score_cache: dict[int, dict] | None = None,
 ) -> dict | None:
     """
     신규 강사 6번째 슬롯 선정 (시나리오 이슈 #3).
@@ -1036,17 +1137,23 @@ def _pick_newcomer_slot(
       - is_active = True (candidate_pool 이 이미 만족)
       - top 5 에 이미 포함되지 않은 강사
 
+    성능: score_cache 에 이미 계산된 점수가 있으면 재사용하여 중복 계산 회피.
+
     반환:
       - 가장 점수 높은 신규 강사 후보 dict (calculate_match_score 결과 + reason)
       - 후보 없으면 None
     """
+    score_cache = score_cache or {}
     candidates: list[dict] = []
     for inst in candidate_pool:
         if inst.id in excluded_ids:
             continue
         if not _is_new_instructor(inst):
             continue
-        scored = calculate_match_score(inst, request, context)
+        # 이미 계산된 점수가 있으면 재사용, 없으면 새로 계산
+        scored = score_cache.get(inst.id)
+        if scored is None:
+            scored = calculate_match_score(inst, request, context)
         # base_score 0 또는 음수 총점은 매칭과 무관 → 제외
         if scored['base_score'] <= 0:
             continue
@@ -1188,8 +1295,12 @@ def find_top_matches(request_id: int, top_n: int = 5) -> dict | None:
     # ── 인증 등급 필터 → 점수 계산 → 0점 이하 제외 ─────────────────
     cert_eligible = [i for i in candidate_pool if _is_cert_eligible(i, specialty)]
 
+    # 성능: 강사 id → 점수 dict 캐시. 후속 단계(_pick_newcomer_slot 등) 에서 재사용.
+    score_cache: dict[int, dict] = {}
     if cert_eligible:
         scored_all = [calculate_match_score(i, request, context) for i in cert_eligible]
+        for s in scored_all:
+            score_cache[s['instructor'].id] = s
         scored_positive = [s for s in scored_all if s['total_score'] > 0]
         scored_positive.sort(key=_sort_key)
         # top_n 보다 1명 더 뽑아둠 (E 보정용 풀)
@@ -1224,7 +1335,11 @@ def find_top_matches(request_id: int, top_n: int = 5) -> dict | None:
                 continue
             if not _is_cert_eligible_for_similar(inst, specialty):
                 continue
-            s = calculate_match_score(inst, request, context)
+            # 이미 계산된 점수 재사용
+            s = score_cache.get(inst.id)
+            if s is None:
+                s = calculate_match_score(inst, request, context)
+                score_cache[inst.id] = s
             if s['specialty_score'] >= 20 and s['total_score'] > 0:
                 s['match_type_override'] = '조건완화추천'
                 relaxed_candidates.append(s)
@@ -1333,7 +1448,9 @@ def find_top_matches(request_id: int, top_n: int = 5) -> dict | None:
     # top 5 매칭과는 별개로 신규 강사 1명을 추가 노출.
     # top 5 에 이미 포함된 강사는 제외하고, 가장 점수 높은 신규 강사를 선정.
     top_ids = {item['instructor'].id for item in result_scored}
-    newcomer_item = _pick_newcomer_slot(candidate_pool, request, context, top_ids)
+    newcomer_item = _pick_newcomer_slot(
+        candidate_pool, request, context, top_ids, score_cache=score_cache,
+    )
     newcomer_slot = None
     if newcomer_item is not None:
         inst = newcomer_item['instructor']

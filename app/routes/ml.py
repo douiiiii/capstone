@@ -14,7 +14,6 @@ from app.models.instructor import Instructor
 from app.routes._errors import error_response, handle_api_errors
 from app.services.data_quality import build_ml_status, build_quality_report
 from app.services.feature_encoder import (
-    build_feature_snapshot,
     encode_instructor,
     encode_request,
 )

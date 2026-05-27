@@ -37,16 +37,9 @@ from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
 from app.models.education_request import EducationRequest  # noqa: E402
 from app.models.instructor import Instructor  # noqa: E402
-from app.models.match import Match  # noqa: E402
 from app.models.organization import Organization  # noqa: E402
-from app.services.class_session_service import (  # noqa: E402
-    build_session_schedule,
-    create_sessions_for_match,
-)
-from app.services.matching_service import (  # noqa: E402
-    calculate_match_score,
-    find_top_matches,
-)
+from app.services.class_session_service import build_session_schedule  # noqa: E402
+from app.services.matching_service import find_top_matches  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────
