@@ -64,6 +64,14 @@ NEW_INSTRUCTOR_THRESHOLD = 10
 MAX_CLASSES_MONTH_MIN = 10
 MAX_CLASSES_MONTH_MAX = 40
 
+# ─────────────────────────────────────────────────────────
+# 권역 0점 가드 (시나리오 이슈 #2)
+# 권역 점수가 0이면 base_score 에 패널티를 더해 후순위로 밀어낸다.
+# - 1지망(권역 일치/인접/이동가능) 후보가 충분하면 자연스럽게 제외됨
+# - 후보가 부족할 때만 fallback 으로 노출되도록 보호
+# ─────────────────────────────────────────────────────────
+REGION_GUARD_PENALTY = -20.0
+
 
 # ───────────────────────────── 보조 유틸 ──────────────────────────────
 
@@ -638,6 +646,16 @@ def calculate_match_score(
     bonuses: list[dict] = []
     penalties: list[dict] = []
 
+    # 권역 0점 가드 (시나리오 이슈 #2)
+    # 권역이 일치/인접/이동가능 중 어느 것에도 해당 안 되면 -20점 패널티
+    # → 다른 보너스로 0점을 극복할 수 없도록 base_score 단계에서 차감
+    if request_region and region_score == 0.0:
+        penalties.append({
+            '항목': '권역 부적합 가드',
+            '점수': REGION_GUARD_PENALTY,
+            '사유': f'요청 권역({request_region}) 부적합 → {REGION_GUARD_PENALTY:.0f}점 가드',
+        })
+
     def _add(name: str, value: float, reason: str):
         """양수면 bonuses, 음수면 penalties 로 정리. 0/빈사유는 무시."""
         if value > 0:
@@ -886,6 +904,54 @@ def _analyze_failure_reasons(
 
 
 # ──────────── E항: 신규 강사 노출 보장 ────────────────────────────────
+
+def _pick_newcomer_slot(
+    candidate_pool: list[Instructor],
+    request: EducationRequest,
+    context: dict,
+    excluded_ids: set[int],
+) -> dict | None:
+    """
+    신규 강사 6번째 슬롯 선정 (시나리오 이슈 #3).
+
+    top 5 매칭과는 별개로 항상 신규 강사 1명을 추가 노출하기 위한 슬롯.
+    조건:
+      - total_classes < 10 (NEW_INSTRUCTOR_THRESHOLD)
+      - base_score > 0 (권역/분야/시간 중 하나 이상 매칭)
+      - is_active = True (candidate_pool 이 이미 만족)
+      - top 5 에 이미 포함되지 않은 강사
+
+    반환:
+      - 가장 점수 높은 신규 강사 후보 dict (calculate_match_score 결과 + reason)
+      - 후보 없으면 None
+    """
+    candidates: list[dict] = []
+    for inst in candidate_pool:
+        if inst.id in excluded_ids:
+            continue
+        if not _is_new_instructor(inst):
+            continue
+        scored = calculate_match_score(inst, request, context)
+        # base_score 0 또는 음수 총점은 매칭과 무관 → 제외
+        if scored['base_score'] <= 0:
+            continue
+        if scored['total_score'] <= 0:
+            continue
+        candidates.append(scored)
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=_sort_key)
+    best = candidates[0]
+    inst = best['instructor']
+    best['newcomer_reason'] = (
+        f'신규 강사 노출 보장 — 누적 강의 {inst.total_classes or 0}회, '
+        f'권역 {best["region_score"]:.0f}+분야 {best["specialty_score"]:.0f}'
+        f'+시간 {best["time_score"]:.0f}={best["base_score"]:.0f}점 기본 매칭'
+    )
+    return best
+
 
 def _ensure_new_instructor_slot(
     scored_sorted: list[dict], top_n: int,
@@ -1139,6 +1205,32 @@ def find_top_matches(request_id: int, top_n: int = 5) -> dict | None:
         }
         result_list.append(d)
 
+    # ── 시나리오 이슈 #3: 6번째 슬롯 — 신규 강사 항상 노출 ─────────────
+    # top 5 매칭과는 별개로 신규 강사 1명을 추가 노출.
+    # top 5 에 이미 포함된 강사는 제외하고, 가장 점수 높은 신규 강사를 선정.
+    top_ids = {item['instructor'].id for item in result_scored}
+    newcomer_item = _pick_newcomer_slot(candidate_pool, request, context, top_ids)
+    newcomer_slot = None
+    if newcomer_item is not None:
+        inst = newcomer_item['instructor']
+        newcomer_slot = {
+            'instructor_id': inst.id,
+            'instructor_name': inst.name,
+            'instructor_region': inst.region,
+            'instructor_specialties': inst.specialties,
+            'instructor_cert_level': inst.cert_level,
+            'instructor_avg_rating': inst.avg_rating,
+            'instructor_total_classes': inst.total_classes,
+            'match_score': newcomer_item['total_score'],
+            'region_score': newcomer_item['region_score'],
+            'specialty_score': newcomer_item['specialty_score'],
+            'time_score': newcomer_item['time_score'],
+            'base_score': newcomer_item['base_score'],
+            'breakdown': newcomer_item['breakdown'],
+            'exposure_reason': newcomer_item['newcomer_reason'],
+            'slot_type': '신규강사슬롯',
+        }
+
     return {
         'matches': result_list,
         'match_mode': match_mode,
@@ -1147,4 +1239,6 @@ def find_top_matches(request_id: int, top_n: int = 5) -> dict | None:
         'auto_excluded': auto_excluded,
         # v4-D: 5명 미만 매칭 시 실패 원인. 충분히 매칭됐을 땐 빈 리스트.
         'failure_reasons': failure_reasons,
+        # 시나리오 이슈 #3: 6번째 슬롯 — 신규 강사 항상 노출 (없으면 None)
+        'newcomer_slot': newcomer_slot,
     }
