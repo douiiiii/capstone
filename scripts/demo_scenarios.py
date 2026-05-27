@@ -424,7 +424,7 @@ def main() -> int:
 
         print()
         print('═' * 72)
-        print('  모든 시연 종료. 발표자 가이드는 docs/DEMO_GUIDE.md 참조.')
+        print('  모든 시연 종료.')
         print('═' * 72)
         print()
 
